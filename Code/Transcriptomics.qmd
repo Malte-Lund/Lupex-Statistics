@@ -1,0 +1,26 @@
+---
+title: "Lecture4"
+format: html
+editor: visual
+---
+
+```{r}
+if(!require('limma')) {
+  install.packages('limma')
+  library('limma')
+}
+
+y <- matrix(rnorm(100*4),100,4)
+design <- cbind(Intercept=1,Group=c(0,0,1,1))
+
+# First set of 5 genes contains 3 that are genuinely differentially expressed
+index1 <- 1:5
+y[index1,3:4] <- y[index1,3:4]+3
+
+# Second set of 5 genes contains none that are DE
+index2 <- 6:10
+
+roast(y,index1,design,contrast=2)
+fry(y,list(set1=index1,set2=index2),design,contrast=2)
+```
+
