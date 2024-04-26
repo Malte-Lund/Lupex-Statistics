@@ -1,0 +1,626 @@
+---
+title: "Simulated Data for LUPEX - Mixed Models"
+format: html
+editor: visual
+---
+
+# Simulated Data and analysis of it for the LUPEX trial
+
+### Packages
+
+```{r}
+#install.packages("faux")
+library(faux)
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("tidyverse")
+library(tidyverse)
+#install.packages("lmerTest")
+library(lmerTest)
+#install.packages("LMMstar")
+#library(LMMstar)
+#install.packages("simstudy")
+#require(simstudy)
+
+#require(ggplot2)
+```
+
+### Document parameters
+
+```{r}
+set.seed(31102023) #current date
+options(digits=4)
+```
+
+## Generate VO2max
+
+```{r}
+sub_n  <- 49 # number of subjects in this simulation
+
+ratio_female <- 0.9 #Ratio of males to females in the study
+CorIFNVo2Max <- -0.3 #Assumed correlation between logIFN and Vo2max at baseline
+Vo2MaxMeanPre <- 22.2*0.69+22.2*0.046+20+25.5*0.057+21.21*0.106 
+#Weights are from O'Dwyer et al 
+#means are from the studies' control groups
+BostromMean   <- 22.2 #Bostrom et al 2016
+BostromWeight <- 0.69
+BostromSD     <- 1.3
+TenchMean     <- 22.2 #Tench et al 2003
+TenchWeight   <- 0.046
+TenchSD       <- 7.24
+ReisMean      <- 25.5 #don Reis-Neto et al. 2013
+ReisWeight    <- 0.057
+ReisSD        <- 5.1
+CarvalhoMean  <- 21.21 #Carvalho et al. 2005
+CarvalhoWeight<- 0.106
+CarvaloSD     <- 3.88
+
+  
+studies<-c("Bostrom2016","Tench2003","Reis2013","Carvalho2005")
+means<-c(BostromMean,TenchMean,ReisMean,CarvalhoMean)
+weights<-c(BostromWeight,TenchWeight,ReisWeight,CarvalhoWeight)
+SD<-c(BostromSD,TenchSD,ReisSD,CarvalhoWeight)
+
+data.prior <- data.frame(studies,means,weights,SD)
+data.prior$trueWeight<-weights/sum(data.prior$weights)
+data.prior$weightedMean<-means*data.prior$trueWeight
+
+Vo2Mean.sim<-sum(data.prior$weightedMean)
+data.prior$weightedSD<-SD*data.prior$trueWeight
+Vo2SD.sim<-sum(data.prior$weightedSD)
+
+LogIFNMean <- 10 #TODO find studies to find the logIFN mean
+LogIFNSD <- 5 #TODO find studies to find the logIFN SD
+#Generate baseline data
+
+dat.sim <- rnorm_multi(n = sub_n, 
+                  mu = c(Vo2Mean.sim, LogIFNMean),
+                  sd = c(Vo2SD.sim, LogIFNSD),
+                  r = c(CorIFNVo2Max), 
+                  varnames = c("VO2preNoSex", "LogIFN"),
+                  empirical = FALSE)
+
+cor(dat.sim$LogIFN,dat.sim$VO2preNoSex)
+mean(dat.sim$VO2preNoSex)
+mean(dat.sim$LogIFN)
+
+
+ID<-as.factor(1:sub_n)
+sex<-sample(x=c("male","female"),prob=c(1-ratio_female,ratio_female),size=sub_n,replace=T)
+#group<-sample(x=c("exercise","control"),prob=c(0.5,0.5),size=sub_n,replace=T)
+dat.sim <-cbind(ID,sex,dat.sim)
+
+diffsex<-1.2 #according to martins et al. 2023 males have 20% higher VO2max than females
+#If we want to keep the same average, with 9 to 1 rate of female to men we need to correct for this factor. mean = (female_mean*9+male_mean*1)/10 and with male_mean=1.2*female mean we can substitute in the formula: mean =10.2/10 So if we multiple all male means by 1.2, we can divide all females by 1.02 to achieve the same mean.
+
+dat.sim$VO2Max_pre<-dat.sim$VO2preNoSex*ifelse(sex=="male",1.2,1/1.02)
+
+dat.sim.means<-dat.sim %>%
+  group_by(sex) %>%
+  summarise_at(vars(VO2Max_pre), list(name = mean))
+female_mean_pre<-dat.sim.means[1,2]
+male_mean_pre<-dat.sim.means[2,2]
+
+dat.sim.sds<-dat.sim %>%
+  group_by(sex) %>%
+  summarise_at(vars(VO2Max_pre), list(name = sd))
+female_sd_pre<-dat.sim.sds[1,2]
+male_sd_pre<-dat.sim.sds[2,2]
+
+males<-subset(dat.sim,sex=="male")
+females<-subset(dat.sim,sex=="female")
+
+#Lets also generate screening data
+VO2maxPre_Screen_Cor_male<- 0.98
+VO2maxPre_Screen_Cor_female<- 0.98
+males$VO2Max_screen<- rnorm_pre(
+  x=males$VO2Max_pre,
+  mu = mean(males$VO2Max_pre),
+  sd = sd(males$VO2Max_pre), 
+  r = VO2maxPre_Screen_Cor_male,
+          empirical=T)
+
+females$VO2Max_screen<- rnorm_pre(
+  x=females$VO2Max_pre,
+  mu = mean(females$VO2Max_pre),
+  sd = sd(females$VO2Max_pre), 
+  r = VO2maxPre_Screen_Cor_female,
+          empirical=T)
+
+males$group<-sample(x=c("exercise","control"),
+                    prob=c(0.5,0.5),
+                    size=length(males$ID),
+                    replace=T)
+females$group<-sample(x=c("exercise","control"),
+                      prob=c(0.5,0.5),
+                      size=length(females$ID),
+                      replace=T)
+
+dat.sim<-rbind(males,females) %>% arrange(ID)
+```
+
+## Now we generate a vector of VO2Max Change, based on the Group variable and the IFN score
+
+We are using this guide:\
+https://debruine.github.io/tutorials/sim-lmer.html
+
+```{r}
+VO2Max_Change_Exercise_Mean<-6 #TODO Lookup the VO2max effect from exercise
+VO2Max_Change_Control_Mean<-2 #TODO Lookup the VO2max effect from Control
+VO2Max_Change_Exercise_SD<- 2 #TODO lookup the vo2max_Change SD 
+VO2Max_Change_Control_SD<- 1 #TODO lookup the vo2max_Change SD
+Vo2Max_Change_IFN_Cor_Exercise<- -0.3
+Vo2Max_Change_IFN_Cor_Control<- -0.1
+Vo2Max_Change_VO2Pre_Cor_Exercise<- 0.1
+Vo2Max_Change_VO2Pre_Cor_Control<- 0.1
+Vo2Max_Change_VO2screen_Cor_Exercise <- 0.1
+Vo2Max_Change_VO2screen_Cor_Control <- 0.1
+excor<-c(Vo2Max_Change_IFN_Cor_Exercise,
+         Vo2Max_Change_VO2Pre_Cor_Exercise,
+         Vo2Max_Change_VO2screen_Cor_Exercise)
+cocor<-c(Vo2Max_Change_IFN_Cor_Control,
+         Vo2Max_Change_VO2Pre_Cor_Control,
+         Vo2Max_Change_VO2screen_Cor_Control)
+
+NeededCor <- data.frame(dat.sim$LogIFN,dat.sim$VO2Max_pre,dat.sim$VO2Max_screen)
+
+
+exercise<-subset(dat.sim,group=="exercise")
+NeededCor_exercise <- data.frame(exercise$LogIFN,exercise$VO2Max_pre,exercise$VO2Max_screen)
+control<-subset(dat.sim,group=="control")
+NeededCor_control <- data.frame(control$LogIFN,control$VO2Max_pre,control$VO2Max_screen)
+
+
+#Lets generate VO2max change
+exercise$VO2MaxChange<- rnorm_pre(
+  x=NeededCor_exercise,
+  mu = VO2Max_Change_Exercise_Mean,
+  sd = VO2Max_Change_Exercise_SD, 
+  r = excor,
+          empirical=T)
+
+control$VO2MaxChange<- rnorm_pre(
+  x=NeededCor_control,
+  mu = VO2Max_Change_Control_Mean,
+  sd = VO2Max_Change_Control_SD, 
+  r = cocor,
+          empirical=T)
+
+dat.sim <-rbind(exercise,control) %>% arrange(ID)
+
+
+cor(dat.sim$VO2MaxChange,dat.sim$LogIFN)
+cor(dat.sim$VO2MaxChange,dat.sim$VO2pre)
+
+dat.sim$VO2Max_post <- dat.sim$VO2pre+dat.sim$VO2MaxChange
+
+#Old way of doing it:
+#dat.sim$Vo2MaxChange <- rnorm_pre(NeededCor, 
+#          mu = ifelse(dat.sim$group=="exercise",VO2Max_Change_Exercise_Mean#,VO2Max_Change_Control_Mean),
+#          sd = ifelse(dat.sim$group=="exercise",VO2Max_Change_Exercise_SD,VO2Max_Change_Control_SD),
+#          r = c(ifelse(dat.sim$group=="exercise",Vo2Max_Change_IFN_Cor_Exercise,Vo2Max_Change_IFN_Cor_Control),Vo2Max_Change_VO2Pre_Cor,Vo2Max_Change_VO2screen_Cor),
+#          empirical=T)
+
+```
+
+So now we have a simulated dataset to test our data analysis
+
+## Data wrangling
+
+```{r}
+library(tidyr)
+
+dat.sim.wide<-dat.sim
+
+dat.sim.long<-
+  dat.sim.wide%>%pivot_longer(
+  cols=c("VO2Max_screen","VO2Max_pre","VO2Max_post"),
+  names_sep = "_",
+  names_to = c(".value","time"))
+
+dat.sim.long$time<-factor(dat.sim.long$time,
+  levels=c("screen","pre","post"),
+  labels=c("screen","pre","post"))
+
+ggplot(dat.sim.long, aes(y=VO2Max, x=time, color = group,group=ID))+
+  geom_point()+geom_line()
+
+ggplot(dat.sim.long, aes(y=VO2Max, x=time, color = group))+
+  geom_point()
+
+
+```
+
+Let's constrain the baseline
+
+## Constrain baseline
+
+```{r}
+dat.sim.long$newgroup<-case_when(
+  dat.sim.long$time=="pre"~"baseline",
+  dat.sim.long$time=="screen"~"baseline",
+  .default=as.character(dat.sim.long$group))
+```
+
+## Using LME4 package
+
+```{r}
+#install.packages("LMMstar")
+#library(LMMstar)
+
+#LMMstar::lmm(VO2Max~sex+IFN*newgroup,
+   # repetion=~time|ID,
+   # data=dat.sim.long
+    
+#)
+
+lmmodel1 <- lmer(VO2Max ~ sex+newgroup * LogIFN + (1|ID), data=dat.sim.long, REML=T)
+summary(lmmodel1)
+
+
+
+plot(lmmodel1)
+
+lm1 <- lm(VO2Max_post~VO2Max_pre+sex+group*LogIFN,data=dat.sim)
+summary(lm1)
+plot(lm1)
+
+dat.sim.long$gmpred <- as.numeric(predict(lmmodel1))
+
+lmmodel2 <- lmer(VO2Max ~ sex+newgroup * LogIFN + (1|time) + (1|ID), data=dat.sim.long, REML=T)
+summary(lmmodel2)
+
+plot(lmmodel2)
+#install.packages("lme4")
+require(lme4)
+#autoplot(lmmodel2)
+
+
+```
+
+## Using LMMStar package
+
+```{r}
+library(LMMstar)
+dat.sim.long<-dat.sim.long%>%mutate(
+  treatment = case_when(
+    time == "screen"       ~ "untreated",
+    time == "pre"          ~ "untreated",
+    group == "control"     ~ "untreated",
+    group == "exercise"    ~ "exercise",
+    T                      ~ NA_character_
+  )
+)
+
+model1.lmmstar<-lmm(
+  formula = VO2Max ~ time+treatment:time+sex,
+  repetition = ~time|ID,
+  structure = "UN",
+  data = dat.sim.long
+)
+
+summary(model1.lmmstar)
+
+model2.lmmstar<-lmm(
+  formula = VO2Max ~ time+treatment:time+ LogIFN+treatment:time:LogIFN+sex,
+  repetition = ~time|ID,
+  structure = "UN",
+  data = dat.sim.long
+)
+model2.sum<-summary(model2.lmmstar)
+
+completecase.model2.lmmstar<-lmmCC(
+  object = VO2Max ~ time+treatment:time+ LogIFN+treatment:time:LogIFN+sex,
+  repetition = ~time|ID,
+  #structure = "UN",
+  data = dat.sim.long
+)
+completecase.model2.sum<-summary(completecase.model2.lmmstar)
+```
+
+## Plot it
+
+```{r}
+#install.packages("lattice")
+require(lattice)
+lattice::xyplot(VO2Max~time, groups=group, data=dat.sim.long, type=c('p','r'), auto.key=T)
+
+
+ggplot(dat.sim.long, aes(x = time, y = VO2Max, colour = group)) +
+  geom_point() +
+  geom_line(aes(group = ID)) +
+  geom_line(aes(y = gmpred), color = "black")
+
+ggplot(dat.sim.long, aes(y=VO2Max, x=time, color = newgroup,group=ID))+
+  geom_point()+geom_line()+stat_summary(aes(group = 1), geom = "point", fun.y = mean,
+    shape = 17, size = 3)
+
+ggplot(dat.sim.wide, aes(x = LogIFN, y = VO2MaxChange, colour = group)) +
+  geom_point() +
+  geom_line(aes(group = ID)) 
+```
+
+## Model the IFNsignature effect
+
+```{r}
+lm2 <- lm(VO2MaxChange ~ sex+group * LogIFN, data=dat.sim.wide)
+
+summary(lm2)
+
+lm3 <- lm(VO2MaxChange ~ sex+group + LogIFN, data=dat.sim.wide)
+
+summary(lm3)
+plot(lm3)
+DeltaV2MbyLogIFN <- ggplot(dat.sim.wide, aes(x = LogIFN, y = VO2MaxChange, colour = group)) +
+  geom_point() +  geom_smooth(method="lm", se=T) + 
+        theme_bw() 
+
+DeltaV2MbyLogIFN
+
+```
+
+We use the code from this guy: https://datascienceplus.com/taking-the-baseline-measurement-into-account-constrained-lda-in-r/
+
+We are trying to constain the baseline for our longitudinal study
+
+```{r}
+library(ggplot2)
+fav.col=c("hotpink", "lightblue","darkgreen")
+ggplot(dat.sim.wide, aes (x=VO2Max_pre,y=VO2Max_post, col=group)) + 
+        geom_point() + geom_smooth(method="lm", se=FALSE) + 
+        scale_color_manual(values=fav.col) + theme_bw()
+```
+
+```{r}
+boxp <- ggplot (dat.sim.long , aes(x=time,y=VO2Max, col=group))+ 
+        geom_boxplot(outlier.size = 0 ) + 
+        geom_point(aes(fill=group, col=NULL),shape=21, alpha=0.5, size=2, 
+        position = position_jitterdodge(jitter.width = 0.2)) + 
+        scale_fill_manual(values=fav.col) + 
+        scale_color_manual(values=fav.col) + 
+        theme_bw() + xlab("") 
+
+boxp
+```
+
+```{r}
+library(nlme)
+X <- model.matrix(~ time * group, data = dat.sim.long)
+colnames(X)
+Xalt <- X[, c("timepre","timepost","timepre:groupexercise" , "timepost:groupexercise")] 
+colnames(Xalt)
+```
+
+```{r}
+clda_gls <- gls(VO2Max ~ Xalt, 
+weights = varIdent(form = ~ 1 | time), 
+correlation=corSymm (form = ~ 1 | ID), 
+data = dat.sim.long)
+summary(clda_gls)
+```
+
+```{r}
+predictions<- cbind( dat.sim.long,clda_gls$fitted)
+
+library(rms) 
+clda_Gls <- Gls(VO2Max ~ Xalt, 
+        weights = varIdent(form = ~ 1 | time), 
+        correlation=corSymm (form = ~ 1 | ID), 
+        data = dat.sim.long)
+
+predictions <- cbind(dat.sim.long, 
+                      predict (clda_Gls, dat.sim.long, conf.int=0.95))
+```
+
+Now we have some predictions to plot (I Hope)
+
+```{r}
+pd <- position_dodge(.1)
+limits <- aes(ymax = upper , ymin=lower, shape=group)
+
+pCI1 <- ggplot(predictions, aes( y=linear.predictors, x=time)) + 
+        geom_errorbar(limits, width= 0.1 , position=pd) + 
+        geom_line(aes(group=group, y=linear.predictors), position=pd) + 
+        geom_point(position=pd, aes( fill=group), shape=21, size=4) + 
+        scale_fill_manual(values=c( "black", "white")) + 
+        theme_bw() + 
+        theme(panel.grid.major = element_blank(), legend.title=element_blank(), 
+        text=element_text(size=14), legend.position="bottom") +
+        xlab("") + 
+        ylab("Estimated mean with corresponding 95% CI")
+pCI1
+```
+
+```{r}
+limits <- aes(ymax = upper , ymin=lower, shape=newgroup)
+pCI1 <- ggplot(predictions, aes( y=linear.predictors, x=time)) + 
+        geom_errorbar(limits, width= 0.1 , position=pd) + 
+        geom_line(aes(group=group, y=linear.predictors), position=pd) + 
+        geom_point(position=pd, aes( fill=newgroup), shape=21, size=4) + 
+        scale_fill_manual(values=c( "black", "white","hotpink")) + 
+        theme_bw() + 
+        theme(panel.grid.major = element_blank(), legend.title=element_blank(), 
+        text=element_text(size=14), legend.position="bottom") +
+        xlab("") + 
+        ylab("Estimated VO2Max with corresponding 95% CI")
+pCI1
+
+pCI1+geom_point(aes(y=VO2Max,fill=newgroup, col=NULL),shape=21, alpha=0.5, size=2, 
+        position = position_jitterdodge(jitter.width = 0.2))
+```
+
+We try to map it also with IFN
+
+We are trying to constain the baseline for our longitudinal study
+
+```{r}
+library(ggplot2) 
+fav.col=c("hotpink", "lightblue","darkgreen") 
+ggplot(dat.sim.wide, aes (x=VO2Max_pre,y=VO2Max_post, col=group)) +
+  geom_point() + geom_smooth(method="lm", se=FALSE) + 
+  scale_color_manual(values=fav.col) +
+  theme_bw()
+```
+
+```{r}
+boxp <- ggplot (dat.sim.long , aes(x=time,y=VO2Max, z=LogIFN, col=group))+
+  geom_boxplot(outlier.size = 0 ) +
+  geom_point(aes(fill=group, col=NULL),shape=21, alpha=0.5, size=2,          position = position_jitterdodge(jitter.width = 0.2)) +
+  scale_fill_manual(values=fav.col) +
+  scale_color_manual(values=fav.col) +
+  theme_bw() +
+  xlab("")   
+boxp
+```
+
+```{r}
+X <- model.matrix(~ time * group+LogIFN*group, data = dat.sim.long) 
+colnames(X) 
+Xalt <- X[, c("timepre","timepost","timepre:groupexercise" , "timepost:groupexercise","groupexercise:LogIFN","LogIFN"  )]  
+colnames(Xalt)
+```
+
+```{r}
+clda_gls <- gls(VO2Max ~ Xalt,
+                weights = varIdent(form = ~ 1 | time),
+                correlation=corSymm (form = ~ 1 | ID),
+                data = dat.sim.long) 
+summary(clda_gls)
+```
+
+```{r}
+predictions<- cbind( dat.sim.long,clda_gls$fitted)  
+library(rms)  
+clda_Gls <- Gls(VO2Max ~ Xalt,
+                weights = varIdent(form = ~ 1 | time),
+                correlation=corSymm (form = ~ 1 | ID),
+                data = dat.sim.long)  
+predictions <- cbind(dat.sim.long,  predict (clda_Gls, dat.sim.long, conf.int=0.95))
+```
+
+Now we have some predictions to plot (I Hope)
+
+```{r}
+pd <- position_dodge(.1) 
+limits <- aes(ymax = upper , ymin=lower, shape=group)
+pCI1 <- ggplot(predictions, aes( y=linear.predictors, x=time)) +
+  geom_errorbar(limits, width= 0.1 , position=pd) +
+  geom_line(aes(group=group, y=linear.predictors), position=pd) +
+  geom_point(position=pd, aes( y=linear.predictors,fill=group), shape=21, size=4) +
+  scale_fill_manual(values=c( "black", "white")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), legend.title=element_blank(),          text=element_text(size=14), legend.position="bottom") +
+  xlab("") +
+  ylab("Estimated mean with corresponding 95% CI") 
+pCI1
+```
+
+```{r}
+limits <- aes(ymax = upper , ymin=lower, shape=newgroup) 
+
+pCI1 <- ggplot(predictions, aes( y=linear.predictors, x=time)) +
+  geom_errorbar(limits, width= 0.1 , position=pd) +
+  geom_line(aes(group=group, y=linear.predictors), position=pd) +
+  geom_point(position=pd, aes( fill=newgroup), shape=21, size=4) +
+  scale_fill_manual(values=c( "black", "white","hotpink")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), legend.title=element_blank(),          text=element_text(size=14), legend.position="bottom") +
+  xlab("") +
+  ylab("Estimated VO2Max with corresponding 95% CI") 
+
+pCI1  
+
+pCI1+
+  geom_point(aes(y=VO2Max,fill=newgroup, col=NULL),shape=21, alpha=0.5, size=2,          position = position_jitterdodge(jitter.width = 0.2))
+```
+
+Trying to use simr package
+
+```{r}
+#install.packages("simr")
+#library(simr)
+
+#model1 <- glmer(z ~ x + (1|g), family="poisson", data=simdata)
+
+#summary(model1)
+
+## <snip>
+
+## Fixed effects:
+
+##Estimate Std. Error z value Pr(>¦z¦) 
+
+##  (Intercept)  1.54079 0.27173 5.670 1.43e-08 ***
+
+## x                -0.11481 0.03955 - 2.903 0.0037 ** 
+```
+
+Trying to use SimLMM
+
+simLMM from designr package:
+
+```{r}
+#source("SimLMM.R")
+#install.packages("designr")
+#library(designr)
+```
+
+```{r}
+#install.packages("simLMM")
+#library(simLMM)
+#cor.mat
+#dat.sim$Vo2MaxSim <- simLMM(~ VO2pre  + Sex + group*LogIFN X + 1 | ID,
+  #                          data = dat.sim,
+   #                         Fixef = c(1, 1.01,1.4,1.1,1.2),
+    #                        VC_sd = list(c(3,2,2,2,2)),
+     #                       CP = 0.3, empirical = TRUE)
+```
+
+Using the http://cran.nexr.com/web/packages/simstudy/vignettes/simstudy.html instead
+
+LogIFNMean\<-10
+
+LogIFNSD\<-3
+
+def \<- defData(varname = "nr", dist = "nonrandom", formula = 7, id = "idnum")
+
+def \<- defData(def, varname = "VO2Pre",
+
+dist = "normal",
+
+formula = Vo2Mean.sim, #Add factors though
+
+variance=Vo2SD.sim\^2)
+
+def \<- defData(def, varname = "sex", dist="categorical",formula = c(0.1,0.9))
+
+def \<- defData(def, varname = "LogIFN",
+
+dist = "normal",
+
+formula = LogIFNMean,
+
+variance = LogIFNSD\^2
+
+link = "log")
+
+def \<- defData(def, varname = "xCat", formula = "0.3;0.2;0.5", dist = "categorical")
+
+def \<- defData(def, varname = "g1", dist = "gamma", formula = "5+xCat", variance = 1,
+
+link = "log")
+
+def \<- defData(def, varname = "a1", dist = "binary", formula = "-3 + xCat",
+
+link = "logit")
+
+def \<- defData(def,varname = "male", dist = "binary",
+
+formula = .1 , id="cid")
+
+dt \<- genData(60, def)
+
+dt
+
+```         
+```
