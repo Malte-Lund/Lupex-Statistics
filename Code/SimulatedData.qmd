@@ -39,7 +39,7 @@ sub_n  <- 49 # number of subjects in this simulation
 
 ratio_female <- 0.9 #Ratio of males to females in the study
 CorIFNVo2Max <- -0.3 #Assumed correlation between logIFN and Vo2max at baseline
-Vo2MaxMeanPre <- 22.2*0.69+22.2*0.046+20+25.5*0.057+21.21*0.106 
+
 #Weights are from O'Dwyer et al 
 #means are from the studies' control groups
 BostromMean   <- 22.2 #Bostrom et al 2016
@@ -55,6 +55,10 @@ CarvalhoMean  <- 21.21 #Carvalho et al. 2005
 CarvalhoWeight<- 0.106
 CarvaloSD     <- 3.88
 
+Vo2MaxMeanPre <-  BostromMean*BostromWeight+
+                  TenchMean*TenchWeight+
+                  ReisMean*ReisWeight+
+                  CarvalhoMean*CarvalhoWeight #These weights don't add up to 1, which gives a mean lower than all of them. This can't really be right, so we continue with the method below:
   
 studies<-c("Bostrom2016","Tench2003","Reis2013","Carvalho2005")
 means<-c(BostromMean,TenchMean,ReisMean,CarvalhoMean)
@@ -90,10 +94,17 @@ sex<-sample(x=c("male","female"),prob=c(1-ratio_female,ratio_female),size=sub_n,
 #group<-sample(x=c("exercise","control"),prob=c(0.5,0.5),size=sub_n,replace=T)
 dat.sim <-cbind(ID,sex,dat.sim)
 
-diffsex<-1.2 #according to martins et al. 2023 males have 20% higher VO2max than females
+diffsex<-1.2 #according to martins et al. 2023 - males have 20% higher VO2max than females
+
 #If we want to keep the same average, with 9 to 1 rate of female to men we need to correct for this factor. mean = (female_mean*9+male_mean*1)/10 and with male_mean=1.2*female mean we can substitute in the formula: mean =10.2/10 So if we multiple all male means by 1.2, we can divide all females by 1.02 to achieve the same mean.
 
-dat.sim$VO2Max_pre<-dat.sim$VO2preNoSex*ifelse(sex=="male",1.2,1/1.02)
+
+
+dat.sim$VO2Max_pre<-dat.sim$VO2preNoSex*ifelse(sex=="male", 
+                                               diffsex,
+                                               1/(ratio_female+(1-ratio_female)*diffsex))
+
+
 
 dat.sim.means<-dat.sim %>%
   group_by(sex) %>%

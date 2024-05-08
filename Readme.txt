@@ -33,4 +33,7 @@ StatistikLupex.Rproj
 
 ~/Output/
 
+~/Input/
+	~ SF36USPOPMEANSD.xslx - Means and SD for US population for normalizing the SF-36
+
 

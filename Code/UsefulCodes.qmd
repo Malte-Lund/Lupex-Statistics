@@ -1,0 +1,46 @@
+---
+title: "Codes for functions that might be useful"
+format: html
+editor: visual
+---
+
+## 
+
+```{r getting the what we want from an EMMEANS object}
+get.emmeans <- function(
+    emmeans.object, 
+    cont_vec = cont_vec.VAT, 
+    level = 0.95){
+  if (class(emmeans.object)!="emmGrid"){
+    warning("not an emmeans object")
+  } 
+  require(emmeans)
+  require(dplyr)
+    contr<-contrast(emmeans.object, method=cont_vec)
+    out<-contr%>%
+      as.data.frame()%>%
+      cbind(
+      lower.CI = confint(contr, level = level)$lower.CL)%>%
+      cbind(
+      upper.CI = confint(contr, level = level)$upper.CL)%>%
+      relocate(contrast,
+      estimate , lower.CI , upper.CI, p.value
+    )
+   return(out)
+}
+
+
+quick.write.emmeans<-function(
+    emmeans.object, 
+    cont_vec = cont_vec.VAT, 
+    level = 0.95,
+    path = here::here()){
+  
+  require(writexl)
+  require(here)
+writexl::write_xlsx(x=
+             get.emmeans(emmeans.object),
+           path = paste( path,substitute(emmeans.object),
+                         ifelse(PP==T,".PP",".ITT"),".xlsx",sep=""))  
+}
+```
