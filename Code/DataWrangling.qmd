@@ -5,10 +5,39 @@ format: html
 editor: visual
 ---
 
-## Importing the data
+## Loading packages - Setting options
 
 ```{r}
 library(readxl)
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+#install.packages("targets")
+library(targets)
+use_targets()
+set.seed(42069)
+
 
 ```
 
+## Importing the data
+
+```{r}
+rawdata<-read_excel(path="L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/EasyTrialRawData.xlsx") #Probably should be in the data subfolder of this project, but I dont want to publicize all of that due to 
+
+
+not_all_na <- function(x) any(!is.na(x))
+
+aerobiccapacity.data <- rawdata %>% filter( schema_name=="2e. Visit 2: VO2max protokol") %>% select(where(not_all_na))%>%mutate(
+  borg=`[borg_skala_efter_test]`+6,
+  timepoint=
+  case_when(
+    task_name == "Visit 5 - Follow-Up" ~ "followup",
+    task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
+     grepl("Baseline",task_name) ~ "baseline", #TODO finish this: This line is supposed to find the latest of the baseline variables and use that as the date. 
+    T~NA_character_
+  )
+)
+
+```
