@@ -1,0 +1,14 @@
+---
+title: "Statistical Analysis - Data Wrangling"
+author: "Malte Lund"
+format: html
+editor: visual
+---
+
+## Importing the data
+
+```{r}
+library(readxl)
+
+```
+
