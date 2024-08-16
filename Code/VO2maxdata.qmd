@@ -1,0 +1,323 @@
+---
+title: "VO2max_data"
+format: html
+editor: visual
+---
+
+## Packages
+
+```{r}
+library(readxl)
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(car)
+library(writexl)
+library(LMMstar)
+library(plotly)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+
+mITT =T
+PP=F
+
+```
+
+## Import data
+
+```{r}
+vo2max.data <- read_excel(path =  here("Data",
+                                                paste0("vo2max", 
+                                                      ifelse(mITT, "_mITT", 
+                                                      ifelse(PP,"_PP","")),
+                                                      ".xlsx")))
+
+```
+
+## Constrain baseline
+
+```{r}
+vo2max.data<-vo2max.data%>%mutate(
+  treat = case_when(
+    timepoint == "baseline" ~ "Pingvin",
+    timepoint == "screening" ~ "Pingvin",
+    timepoint == "followup" ~ treatment,
+    T~NA_character_
+  ))%>%mutate(
+    treat = factor(treat, levels = c("Pingvin", "Søløve")),
+    timepoint = factor(timepoint, levels = c("screening", "baseline", "followup"))
+  )
+
+
+```
+
+## Take a look at some histograms & summary statistics data
+
+```{r}
+vo2max.data%>%ggplot( aes(x=m_1_2, fill = treatment))+geom_histogram()
+
+miss<-summarizeNA(vo2max.data)
+
+plot(miss)
+
+sss <- LMMstar::summarize(kondital+borg ~ timepoint:treatment, data = vo2max.data, na.rm = TRUE)
+
+print(sss, digits = 2)
+
+sss2 <- summarize(kondital+borg ~ treatment+timepoint|id, data = vo2max.data, na.rm = TRUE)
+print(sss2, digits = 3)
+
+sss2 <- summarize(kondital ~ treatment+timepoint|id, data = vo2max.data, na.rm = TRUE)
+print(sss2, digits = 3)
+
+plot(sss2, type = "mean") ## left panel
+plot(sss2, type = "sd") ## middle panel
+plot(sss2, type = "cor") ## right panel
+```
+
+## Main Model
+
+```{r}
+model1.kondital.lmm<-lmm(
+  formula = kondital ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+summary(model1.kondital.lmm)
+plot(model1.kondital.lmm, type = "scatterplot")
+plot(model1.kondital.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model1.kondital.lmm, variable = NULL)
+
+model2.kondital.lmm<-lmm(
+  formula = kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+
+summary(model2.kondital.lmm)
+plot(model2.kondital.lmm, type = "scatterplot")
+plot(model2.kondital.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+effects(model2.kondital.lmm, variable = NULL)
+effects(model2.kondital.lmm, variable = "treat")
+
+model3.kondital.m.1.2.sexinteract.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint:sex+ m_1_2+treat:timepoint:m_1_2:sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+
+summary(model3.kondital.m.1.2.sexinteract.lmm)
+plot(model3.kondital.m.1.2.sexinteract.lmm, type = "scatterplot")
+plot(model3.kondital.m.1.2.sexinteract.lmm, type = "qqplot")
+
+
+model2.kondital.el.sherb.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint+ ifn_1_el_sherb+treat:timepoint:ifn_1_el_sherb+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+
+summary(model2.kondital.el.sherb.lmm)
+plot(model2.kondital.el.sherb.lmm, type = "scatterplot")
+plot(model2.kondital.el.sherb.lmm, type = "qqplot")
+
+
+model2.kondital.m1.2_geomean.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint+ m_1_2_geomean+treat:timepoint:m_1_2_geomean+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+
+summary(model2.kondital.m1.2_geomean.lmm)
+plot(model2.kondital.m1.2_geomean.lmm, type = "scatterplot")
+plot(model2.kondital.m1.2_geomean.lmm, type = "qqplot")
+
+
+model1.vo2max.lmm<-lmm(
+  formula = vo_2_max ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+summary(model1.vo2max.lmm)
+plot(model1.vo2max.lmm, type = "scatterplot")
+plot(model1.vo2max.lmm, type = "qqplot")
+
+
+
+
+model2.vo2max.lmm<-lmm(
+  formula = vo_2_max ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
+
+summary(model2.vo2max.lmm)
+plot(model2.vo2max.lmm, type = "scatterplot")
+plot(model2.vo2max.lmm, type = "qqplot")
+
+
+#library(lme4)
+#lmmodel1 <- lmer(
+#  kondital ~ timepoint+treat+treat:timepoint+sex + (1|id),
+#                 data=vo2max.data, 
+#  REML=T)
+#summary(lmmodel1)
+#plot(lmmodel1)
+#Anova(lmmodel1, type=3)
+
+#lmmodel2 <- lmer(
+#  kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex + (1|id),
+#                 data=vo2max.data, 
+#  REML=T)
+#plot(lmmodel2)
+#summary(lmmodel2)
+#Anova(lmmodel2, type =3)
+```
+
+## Model on just baseline and followup because screening is statistically different from baseline
+
+```{r}
+vo2max.data.no.screen <- vo2max.data %>% dplyr::filter(timepoint != "screening")
+
+model.noscreen.kondital.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data.no.screen
+)
+summary(model.noscreen.kondital.lmm)
+plot(model.noscreen.kondital.lmm, type = "scatterplot")
+plot(model.noscreen.kondital.lmm, type = "qqplot")
+
+
+```
+
+## Graphics
+
+```{r}
+#spaghettiplot.Vo2Max<-vo2max.data%>%ggplot(
+ # aes(
+#    x=timepoint,
+#    y=kondital))+
+#  geom_point(aes(colour=treat))+
+#  geom_line(aes(group=id, colour=treat))
+
+#spaghettiplot.Vo2Max
+#ggplotly(spaghettiplot.Vo2Max)
+
+
+plot(model2.kondital.lmm, type = "fit", obs.alpha = 0.4, ci = FALSE, size.text = 20, colo="treatment")
+
+
+
+plot(model2.kondital.lmm, type = "fit", color = "treatment", ci.alpha = NA, size.text = 20)
+
+#plot(model.noscreen.kondital.lmm, type = "fit", color = "treatment", ci.alpha = NA, size.text = 20)
+
+
+```
+
+## Graphics (and exploratory models) on change scores:
+
+```{r}
+library(tidyr)
+vo2max.data.wide<-vo2max.data %>% select(id, treatment, timepoint,
+                                         kondital, vo_2_max, sex, m_1_2, m_1_2_geomean, m_3_4, m_3_4_geomean, m_5_12, m_5_12_geomean, ifn_1_el_sherb, ifn_1_el_sherb_geomean, ifn_2_el_sherb, ifn_2_el_sherb_geomean, ifn_2_siddiqi, ifn_2_siddiqi_geomean)%>% pivot_wider(
+  names_from = "timepoint",
+  id_cols = c("id", "treatment", "sex", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
+  values_from = c("kondital", "vo_2_max")
+)%>%mutate(
+  delta_kondi = round(kondital_followup-(kondital_screening+kondital_baseline)/2,2),
+  delta_vo2max = round(vo_2_max_followup -(vo_2_max_screening+vo_2_max_baseline)/2,1),
+  delta_kondi_BLFU = kondital_followup - kondital_baseline,
+  delta_vo2max_BLFU = vo_2_max_followup - vo_2_max_baseline
+)
+
+kondi_by_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+kondi_by_m.1.2
+
+kondi_by_m.1.2_geomean <- ggplot(vo2max.data.wide, aes(x = m_1_2_geomean, y = delta_kondi, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+kondi_by_m.1.2_geomean
+
+kondi_by_IFN1_el.sherb <- ggplot(vo2max.data.wide, aes(x = ifn_1_el_sherb, y = delta_kondi, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+kondi_by_IFN1_el.sherb
+
+model.delta.kondi<-lm(delta_kondi ~ sex+m_1_2 * treatment, data = vo2max.data.wide)
+summary(model.delta.kondi)
+
+model.BLFU.kondi<-lm(delta_kondi_BLFU ~ sex+m_1_2 * treatment, data = vo2max.data.wide)
+summary(model.BLFU.kondi)
+
+kondi_BLFU_m.1.2_geomean <- ggplot(vo2max.data.wide, aes(x = m_1_2_geomean, y = delta_kondi_BLFU, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+kondi_BLFU_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi_BLFU, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw()
+
+
+vo2_by_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_vo2max, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+vo2_by_m.1.2
+
+model.delta.vo2<-lm(delta_vo2max ~ sex + m_1_2 * treatment, data = vo2max.data.wide)
+summary(model.delta.vo2)
+
+
+```
+
+## Waterfall plot
+
+```{r}
+#https://stackoverflow.com/questions/16588022/how-can-i-reorder-the-x-axis-in-a-plot-in-r
+ggplot(vo2max.data.wide) + 
+geom_bar(stat="identity", aes(x=id, y=delta_kondi,
+                              fill=treatment))
+vo2max.data.wide.forwaterfall <- vo2max.data.wide %>% filter(!is.na(delta_kondi))%>% arrange(-delta_kondi)
+
+vo2max.data.wide.forwaterfall$id <- as.vector(stringr::str_sub(vo2max.data.wide.forwaterfall$id,start = 1)) #get rid of factors
+vo2max.data.wide.forwaterfall$id = factor(vo2max.data.wide.forwaterfall$id,
+                                                   vo2max.data.wide.forwaterfall$id) #add ordered factors back
+g<-ggplot(vo2max.data.wide.forwaterfall) + 
+geom_bar(stat="identity", aes(x=id, y=delta_kondi,
+                              fill=treatment))
+ggplotly(g)
+g
+
+vo2max.data.wide.forwaterfall <- vo2max.data.wide %>% filter(!is.na(delta_vo2max))%>% arrange(-delta_vo2max)
+vo2max.data.wide.forwaterfall$id <- as.vector(stringr::str_sub(vo2max.data.wide.forwaterfall$id,start = 1)) #get rid of factors
+vo2max.data.wide.forwaterfall$id = factor(vo2max.data.wide.forwaterfall$id,
+                                                   vo2max.data.wide.forwaterfall$id) #add ordered factors back
+g<-ggplot(vo2max.data.wide.forwaterfall) + 
+geom_bar(stat="identity", aes(x=id, y=delta_vo2max,
+                              fill=treatment))
+g
+
+
+ggplotly(g)
+```

@@ -1,0 +1,124 @@
+---
+title: "CytokineScoreModels"
+format: html
+editor: visual
+---
+
+## CytokineScoreModels
+
+```{r}
+library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(LMMstar)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+
+```
+
+## Choose mITT or PP
+
+```{r}
+PP=F
+mITT = T
+
+if (mITT && PP) {
+warning("Don't set both mITT and PP as true, it will probably default to mITT, but I haven't tested it properly.")}
+```
+
+## Import data
+
+```{r}
+cytokine_scores<-read_excel(path=here("output","cytokinescores.xlsx"))%>%mutate(
+  mITT = case_when(
+             id == "lup_003" ~ #Excluded due to pre-transplantation
+               case_when(timepoint == "Extra" ~ 0,
+                         T~1),
+             id == "lup_021" ~ 0, #Excluded due to pregnancy
+             id == "lup_006" ~ 0, #Excluded due to SLEDAI = 14 at baseline
+            T ~ 1),
+  PP = case_when(
+    #TODO insert list of PP inclusions
+             T ~ 0))
+
+randomization_key<-read_excel(path=here("data","RandomizationKey_pingvin_søløve.xlsx"))%>%select(ID,Allocation)%>%
+  rename(treatment=Allocation)
+colnames(randomization_key)<-to_snake_case(colnames(randomization_key))
+randomization_key$id<-to_snake_case(randomization_key$id)
+
+ 
+if (PP) {
+cytokine.data.raw<- cytokine_scores %>%left_join(randomization_key)%>%filter(PP == 1) 
+}
+
+if (mITT){
+cytokine.data.raw<- cytokine_scores %>%left_join(randomization_key)%>%filter(mITT == 1)
+}
+
+#Remove healthy controls add sex and treat variable
+
+sex.data <- read_excel(path =  here("Data",
+                                                paste0("vo2max", 
+                                                      ifelse(mITT, "_mITT", 
+                                                      ifelse(PP,"_PP","")),
+                                                      ".xlsx")))%>%dplyr::select(id, sex)
+
+sex.data<-sex.data[!duplicated(sex.data), ]
+
+cytokine.data<-cytokine.data.raw %>% filter(timepoint!="HealthyControl")%>%left_join(sex.data)%>%mutate(
+  treat = case_when(
+    timepoint == "Baseline" ~ "Pingvin",
+    timepoint == "Followup" ~ treatment,
+    T ~ treatment
+  )
+)
+```
+
+## Main Model of M.1.2. change due to intervention
+
+```{r}
+model1.m_1_2.lmm<-lmm(
+  formula = m_1_2 ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = cytokine.data
+)
+summary(model1.m_1_2.lmm)
+plot(model1.m_1_2.lmm, type = "scatterplot")
+plot(model1.m_1_2.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model1.m_1_2.lmm, variable = NULL)
+```
+
+## Check all the models in a loop
+
+```{r}
+vector_of_cytokinescores <- colnames(cytokine.data)[3:18]
+
+for (score in vector_of_cytokinescores){
+  model1.lmm<-lmm(
+  formula = reformulate(
+    termlabels ="timepoint+treat:timepoint+sex",
+    response = score
+  ),
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = cytokine.data
+)
+summary(model1.lmm)
+plot(model1.lmm, type = "scatterplot")
+plot(model1.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+#effects(model1.lmm, variable = NULL)
+}
+```
+

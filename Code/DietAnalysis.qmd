@@ -1,0 +1,239 @@
+---
+title: "DietAnalysis"
+format: html
+editor: visual
+---
+
+## Dietary Analysis of LUPEX trial
+
+```{r}
+library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(LMMstar)
+library(stringr)
+library(lubridate)
+set.seed(69420)
+
+
+```
+
+# Load the data
+
+```{r}
+excelfile<-dir(path=here("Data","Kostregistreringer fra Vitakost"))%>%str_detect(pattern=".xlsx")
+files <- dir(path=here("Data","Kostregistreringer fra Vitakost"))[excelfile]
+
+substr(files[15], start = 1, stop = 6)
+
+#make data.frame to populate
+id<-rep(NA_character_, length(files))
+date<-rep(NA_character_, length(files))
+timepoint<-rep(NA_character_, length(files))
+energy_kJ <- rep(NA_real_, length(files))
+fat_g<-rep(NA_real_, length(files))
+carbohydrate_g<-rep(NA_real_, length(files))
+protein_g<-rep(NA_real_, length(files))
+alcohol_g<-rep(NA_real_, length(files))
+
+dietaryregistration<-data.frame(id, files, date, timepoint, energy_kJ, fat_g, carbohydrate_g, protein_g, alcohol_g)%>%mutate(
+  id = to_snake_case(substr(files, start = 1, stop = 6)),
+  timepoint = case_when(
+    substr(files, start = 7, stop = 7) == "a" ~ "Baseline",
+    substr(files, start = 7, stop = 7) == "b" ~ "Followup",
+    T~NA_character_
+  ),
+  date = str_extract(string=files,pattern="[0-9_-]+(?=\\.xlsx)")%>%str_replace_all(pattern="_",replacement="/"),
+  date_as_dmy = dmy(date)
+)
+```
+
+## For loop to create calculate the intake per day
+```{r}
+for (file in files){
+data<-read_excel(path=here("Data","Kostregistreringer fra Vitakost",file))
+
+dietaryregistration$energy_kJ[match(file,files)]<-
+          sum(data["Energy (kJ)"], na.rm =T)
+dietaryregistration$fat_g[match(file,files)] <- 
+          sum(data["Fat (g)"], na.rm =T)
+dietaryregistration$carbohydrate_g[match(file,files)] <- 
+      sum(data["Carbohydrate, available (g)"], na.rm =T)
+dietaryregistration$protein_g[match(file,files)] <- 
+      sum(data["Protein (g)"], na.rm =T)
+dietaryregistration$alcohol_g[match(file,files)]<- 
+      sum(data["Alcohol (g)"], na.rm =T)
+  
+}
+
+dietsummaries<-dietaryregistration %>%
+  group_by(id,timepoint)%>%
+  summarise(Energy_kJ_mean =     round(mean(energy_kJ, na.rm=T),2),
+            fat_g_mean =         round(mean(fat_g, na.rm=T),2),
+            carbohydrate_g_mean= round(mean(carbohydrate_g,na.rm=T),2),
+            protein_g_mean =     round(mean(protein_g,na.rm=T),2),
+            alcohol_g_mean =     round(mean(alcohol_g,na.rm=T),2))
+
+write_xlsx(x=dietsummaries,
+           path=here("Data","DietaryReports.xlsx"))
+
+```
+# Choose PP or mITT
+
+```{r}
+mITT = T
+PP = F
+```
+
+# Combine the dataset
+```{r}
+dietsummaries_loaded<-read_excel(path=here("Data","DietaryReports.xlsx"))%>%
+  mutate(id=to_snake_case(id))
+
+
+group_cytokine<-read_excel(path = here("Data","grouping_cytokine.xlsx"))
+
+#we draw the sex of participants from the VO2max-data
+sex.data <- read_excel(path =  here("Data","vo2max_mITT.xlsx"))%>%dplyr::select(
+                                                        id,sex
+                                                      )
+sex.data<-sex.data[!duplicated(sex.data), ]
+
+diet_group<-left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%mutate(
+  treat = case_when(
+    timepoint == "Baseline" ~ "Pingvin",
+    timepoint == "Followup" ~ treatment,
+    T~ NA_character_
+  ))%>%left_join(sex.data, by=join_by(id))%>%relocate(
+    id, sex, treat, timepoint
+  )
+
+```
+## Models for Energy, Fat, Carbohydrate, Protein, Alcohol intake changes by intervention:
+
+```{r}
+model1.energy.lmm<-lmm(
+  formula = Energy_kJ_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model1.energy.lmm)
+plot(model1.energy.lmm, type = "scatterplot")
+plot(model1.energy.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model1.fat.lmm<-lmm(
+  formula = fat_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model1.fat.lmm)
+plot(model1.fat.lmm, type = "scatterplot")
+plot(model1.fat.lmm, type = "qqplot")
+#anova(model1.fat.lmm)
+
+model1.carb.lmm<-lmm(
+  formula = carbohydrate_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model1.carb.lmm)
+plot(model1.carb.lmm, type = "scatterplot")
+plot(model1.carb.lmm, type = "qqplot")
+#anova(model1.carb.lmm) 
+
+model1.protein.lmm<-lmm(
+  formula = protein_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model1.protein.lmm)
+plot(model1.protein.lmm, type = "scatterplot")
+plot(model1.protein.lmm, type = "qqplot")
+#anova(model1.protein.lmm)
+
+model1.alcohol.lmm<-lmm(
+  formula = alcohol_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model1.alcohol.lmm)
+plot(model1.alcohol.lmm, type = "scatterplot")
+plot(model1.alcohol.lmm, type = "qqplot")
+#anova(model1.alcohol.lmm)
+
+```
+
+##Models with m_1_2 interaction
+```{r}
+
+model2.energy.m12.lmm<-lmm(
+  formula = Energy_kJ_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.energy.m12.lmm)
+plot(model2.energy.m12.lmm, type = "scatterplot")
+plot(model2.energy.m12.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.fat.m12.lmm<-lmm(
+  formula = fat_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.fat.m12.lmm)
+plot(model2.fat.m12.lmm, type = "scatterplot")
+plot(model2.fat.m12.lmm, type = "qqplot")
+#anova(model2.fat.m12.lmm)
+
+model2.carb.m12.lmm<-lmm(
+  formula = carbohydrate_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.carb.m12.lmm)
+plot(model2.carb.m12.lmm, type = "scatterplot")
+plot(model2.carb.m12.lmm, type = "qqplot")
+#anova(model2.carb.m12.lmm) 
+
+model2.protein.m12.lmm<-lmm(
+  formula = protein_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.protein.m12.lmm)
+plot(model2.protein.m12.lmm, type = "scatterplot")
+plot(model2.protein.m12.lmm, type = "qqplot")
+#anova(model1.protein.lmm)
+
+model2.alcohol.m12.lmm<-lmm(
+  formula = alcohol_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.alcohol.m12.lmm)
+plot(model2.alcohol.m12.lmm, type = "scatterplot")
+plot(model2.alcohol.m12.lmm, type = "qqplot")
+#anova(model2.alcohol.m12.lmm)
+
+```
+
+

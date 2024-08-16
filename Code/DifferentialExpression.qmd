@@ -1,0 +1,182 @@
+---
+title: "Differential Expression analysis"
+format: html
+editor: visual
+---
+
+# Differential Expression analysis for LUPEX
+
+```{r}
+library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(LMMstar)
+set.seed(69420)
+
+
+```
+
+##Choose mITT or PP
+
+```{r}
+mITT = T
+PP = F
+```
+
+Read data from excel documents
+
+```{r}
+nanostring_ID_as_rows<-read_excel(path=here("output","nanostring_ID_as_rows.xlsx"))%>%
+  mutate(id = to_snake_case(ID))
+
+group<-read_excel(path=here("data","RandomizationKey_pingvin_søløve.xlsx"))%>%dplyr::select(ID,Allocation)%>%
+  mutate(treatment=Allocation)
+colnames(group)<-to_snake_case(colnames(group))
+group$id<-to_snake_case(group$id)
+
+nanostring_ID_as_rows
+
+gene_ex_data<-left_join(nanostring_ID_as_rows, group)%>%relocate(id, treatment, timepoint)
+
+str(gene_ex_data)
+```
+
+# Create models, as a for loop
+
+```{r}
+data<-gene_ex_data%>%filter(timepoint!="HealthyControl")%>%filter(timepoint!="Extra") %>% mutate(treat = case_when(
+  timepoint == "Baseline" ~ "Pingvin",
+  T~treatment
+))
+colnames(data)<-to_snake_case(colnames(data))
+genecols<-colnames(data)[15:826] #Before running the next code block, remember to double check that these are the genecolumns
+
+```
+
+## Intense Loop of gene expression
+This for loop is quite intensive, it creates a linear mixed effect model for each gene and creates a log2fold change.
+```{r eval = F}
+
+#Create dataframe to populate:
+
+p_interaction<-rep(NA_real_, length.out = length(genecols))
+log2fold_difference_between_ex_noex<-rep(NA_real_, length.out = length(genecols))
+differentialexpression<-data.frame(p_interaction, log2fold_difference_between_ex_noex, row.names = genecols)
+sumry_model <- vector('list', length(genecols))
+
+for (gene in genecols){
+  
+  lmm<-lmm(formula = reformulate(c("timepoint","treat","treat:timepoint") ,response = gene),
+              data = data)
+
+  differentialexpression$p_interaction[match(gene,genecols)]<- model.tables(lmm)$p.value[3]
+  differentialexpression$log2fold_difference_between_ex_noex[match(gene,genecols)]   <- 
+    log(sum(model.tables(lmm)$estimate[1:3])/
+        sum(model.tables(lmm)$estimate[1:2]),
+        base = 2)
+  sumry_model[[gene]] <- summary(lmm)  
+}
+
+saveRDS(sumry_model, file = here("Output","DifferentialExpression",
+                                 paste0("Summary_LMM_Genes",
+                                        ifelse(PP,"_PP",ifelse(mITT,"_mITT")),".rds")))
+saveRDS(differentialexpression, file = here("Output","DifferentialExpression",
+                                 paste0("DiffExp",
+                                        ifelse(PP,"_PP",ifelse(mITT,"_mITT")),".rds")))
+
+#Below is legacy code I used to test out how I would access the estimataes and p-values in the lmm system
+#Test
+#lmm<-lmm(
+#  formula = A2M ~ timepoint+treat+treat:timepoint,
+#  repetition = ~timepoint|id,
+#  structure = "UN",
+#  data = data
+#)
+
+#model.tables(lmm)
+#sum(model.tables(lmm)$estimate[1:2])/sum(model.tables(lmm)$estimate[1:3])
+
+#effects(lmm, type = "difference", variable = "treat")
+
+#effects(lmm, type = "difference", variable = "timepoint",
+#conditional = c("treat"), repetition = "Followup")
+
+```
+## Shortcut
+Instead the output of that code can be loaded with this
+```{r eval = T}
+sumry_model<-readRDS(file = here("Output","DifferentialExpression",
+                                 paste0("Summary_LMM_Genes",
+                                        ifelse(PP,"_PP",ifelse(mITT,"_mITT")),".rds")))
+
+
+differentialexpression <- readRDS(file = here("Output","DifferentialExpression",
+                                 paste0("DiffExp",
+                                        ifelse(PP,"_PP",ifelse(mITT,"_mITT")),".rds")))
+
+
+#p.adjust(p, method = p.adjust.methods, n = length(p))
+```
+## Adjusted P-Values by FDR
+```{r}
+differentialexpression$p_adjust_FDR <- p.adjust(differentialexpression$p_interaction, method = "fdr")
+#As all these are the same value, I assume there is no meaningful difference. Maybe I should have done a poisson regression ??
+
+cut_off<- -log(0.05, base=10)
+
+differentialexpression<-differentialexpression%>%mutate(
+  log10_P_Interact = log(p_interaction ,base=10),
+  significance = factor(case_when(
+    log10_P_Interact < -cut_off ~ "significant",
+    T ~ "non-significant"
+  ), levels = c ("significant", "non-significant")),
+  gene=rownames(differentialexpression),
+   log10_P_adjust_FDR = log(p_adjust_FDR ,base=10)
+)
+
+
+
+volcano_plot<- differentialexpression%>%ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_Interact,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+volcano_plot
+
+library(plotly)
+volcano_plot
+ggplotly(volcano_plot)
+#This volcanoplot plots the log2fold ratio in genes at followup between exercise and control (so exercise divided by control) against the uncorrected p-value of the difference. It used normalized gene counts by the Nanostring normalisation, and it used a linear mixed effect model for each gene.
+#Really this plot shows mostly noise, but if I don't show this noise, the 
+
+#I am contemplating fitting a negative binomial model to each gene instead.
+
+volcano_plot_adj<- differentialexpression%>%ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_adjust_FDR,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+volcano_plot_adj #This plot is a bit boring, but more true, most of what happens is probably noise.. 
+
+```
+# Principal component analysis
+Linear mixed model on principle components
+```{r}
+
+```
+

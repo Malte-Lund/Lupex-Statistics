@@ -1,0 +1,567 @@
+---
+title: "Questionnaires"
+author: "Malte Lund Adamsen"
+format: html
+editor: visual
+---
+
+## Questionnaires
+
+## Packages and options
+
+```{r}
+library(readxl)
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(LMMstar)
+library(plotly)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+```
+## Choose mITT or PP (or ITT by leaving both F)
+```{r}
+mITT = T
+PP = F
+```
+
+Load data
+```{r}
+questionnaires.combined.data<-read_excel(path = here("Output",paste0(
+                       "Questionnaires_combined",
+                       ifelse(mITT,"_mITT",""),ifelse(PP,"_PP",""),
+                       ".xlsx")))
+```
+
+
+#These first few paragraphs have been moved to the DataWrangling.qmd
+##Load questionnaires, create fatigue score
+
+```{r eval = F}
+questionnaires <- read_xlsx(path=here("Data/easy_trial_seperate_schemes/_g_visit__spørgeskemaer.mITT.data .xlsx"))%>%mutate(
+  timepoint=
+  case_when(
+    task_name == "Visit 5 - Follow-Up" ~ "followup",
+    task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
+     grepl("Baseline",task_name) ~ "baseline",  
+    T~NA_character_
+  )
+)%>%filter(!is.na(timepoint))%>%mutate(
+  id = to_snake_case(allocation_no),
+  treat = case_when(
+    timepoint == "baseline" ~ "Pingvin",
+    timepoint == "screening" ~ "Pingvin",
+    timepoint == "followup" ~ treatment,
+    T~NA_character_
+  ))%>%mutate(
+    treat = factor(treat, levels = c("Pingvin", "Søløve")),
+    timepoint = factor(timepoint, levels = c("screening", "baseline", "followup"))
+  )%>%filter(!is.na(schema_version))
+
+questionnaires <- questionnaires[,colSums(is.na(questionnaires))<nrow(questionnaires)]%>%mutate()
+#str(questionnaires)
+
+questionnaires$fss_laengerevarende_aktivitet<-as.numeric(questionnaires$fss_laengerevarende_aktivitet)   
+questionnaires$fss_funktionsindkraenkning <-as.numeric(questionnaires$fss_funktionsindkraenkning )
+questionnaires$slaq_unusual_headache<- as.numeric(questionnaires$slaq_unusual_headache)
+questionnaires$slaq_muskelsvaghed <- as.numeric(questionnaires$slaq_muskelsvaghed)
+questionnaires$sf_36_7[56] <- 3 #TODO check this value, it is written as both 2 and 4 in the database, so I take the average.
+questionnaires$sf_36_7<-as.numeric(questionnaires$sf_36_7)
+questionnaires$sf_36_8<-as.numeric(questionnaires$sf_36_8)
+
+
+
+```
+
+## Create FSS composites
+
+```{r eval =F }
+questionnaires.data <- questionnaires %>% mutate(
+  fatigue.mean = rowMeans(select(questionnaires, c(
+    "fss_motivation",
+    "fss_motion",
+    "fss_let_traet",
+    "fss_begraens",
+    "fss_problemer",
+    "fss_laengerevarende_aktivitet",
+    "fss_pligter_og_ansvar",
+    "fss_funktionsindkraenkning",
+    "fss_arbejde_familie_fritid")),
+    na.rm=T))%>%filter(!is.na(fatigue.mean))
+```
+
+## Create SF-36 composites
+
+Code taken from my own code in RABEX
+
+https://www.rand.org/health-care/surveys_tools/mos/36-item-short-form/scoring.html https://github.com/dgrisafe/R-SF-36/blob/master/SF-36%20Scoring.Rmd
+
+```{r eval =F}
+SF_36<-questionnaires.data %>% select(id,timepoint, treatment,52:87)
+
+colnames(SF_36)[4:39] <- str_replace(string=colnames(SF_36)[4:39], pattern = "_36_", replacement = "_")
+SF_36[4:39]<-sapply(SF_36[4:39],as.numeric)
+
+SF_36_recoded<-SF_36%>% #Weighing columns according to https://www.rand.org/health-care/surveys_tools/mos/36-item-short-form/scoring.html
+  mutate(across( # 5 Point reverse
+                .cols=c(sf_1, #1 på RAND
+                        sf_2, #2 på RAND
+                        sf_6, #20 på RAND
+                        sf_8, #22 på RAND
+                        sf_11_b,
+                        sf_11_d
+                        ),~100-(.-1)*25)) %>%
+  mutate(across( # 3 Point no reverse
+                .cols=c(sf_3_a,
+                        sf_3_b,
+                        sf_3_c,
+                        sf_3_d,
+                        sf_3_e,
+                        sf_3_f,
+                        sf_3_g,
+                        sf_3_h,
+                        sf_3_i,
+                        sf_3_j),~(.-1)*50))%>%
+  mutate(across( # 2 Point no reverse
+                .cols=c(sf_4_a,
+                        sf_4_b,
+                        sf_4_c,
+                        sf_4_d,
+                        sf_5_a,
+                        sf_5_b,
+                        sf_5_c),~(.-1)*100))%>%
+  mutate(across( # 6 Point reverse
+                .cols=c(sf_7,   #21 på RAND
+                        sf_9_a, #23 på RAND
+                        sf_9_d, #26 på RAND
+                        sf_9_e, #27 på RAND
+                        sf_9_h) #30 på RAND
+                  ,~100-(.-1)*100/5))%>%
+  mutate(across( # 6 Point no reverse
+                .cols=c(sf_9_b, #24 på RAND
+                        sf_9_c, #25 på RAND
+                        sf_9_f, #28 på RAND
+                        sf_9_g, #29 på RAND
+                        sf_9_i  #31 på RAND
+                        ) 
+                  ,~(.-1)*100/5))%>%
+  mutate(across( # 5 Point no reverse
+                .cols=c(sf_10, #32 på RAND
+                        sf_11_a, #33 på RAND
+                        sf_11_c #35 på RAND
+                        ) 
+                  ,~(.-1)*100/4))
+
+#Establish Domains
+SF_36_recoded <-SF_36_recoded %>% group_by(id,timepoint)%>%mutate(
+  physical_function = mean(c(             sf_3_a,
+                                          sf_3_b,
+                                          sf_3_c,
+                                          sf_3_d,
+                                          sf_3_e,
+                                          sf_3_f,
+                                          sf_3_g,
+                                          sf_3_h,
+                                          sf_3_i,
+                                          sf_3_j),na.rm=T),
+  role_limitations_physical_health = mean(c(
+                                          sf_4_a,
+                                          sf_4_b,
+                                          sf_4_c,
+                                          sf_4_d), na.rm=T),
+  role_limitations_emotional_health = mean(c(
+                                          sf_5_a,
+                                          sf_5_b,
+                                          sf_5_c), na.rm=T),
+  energy_fatigue = mean(c(
+                                          sf_9_a, #23 på RAND
+                                          sf_9_e, #27 på RAND
+                                          sf_9_g, #29 på RAND
+                                          sf_9_i  #31 på RAND
+                        ), na.rm=T),
+  emotional_well_being = mean(c(
+                                          sf_9_b, #24 på RAND
+                                          sf_9_c, #25 på RAND
+                                          sf_9_d, #26 på RAND
+                                          sf_9_f, #28 på RAND
+                                          sf_9_h) #30 på RAND
+                        ,na.rm=T),
+  social_functioning = mean(c(
+                                          sf_6, #20 på RAND
+                                          sf_10 #32 på RAND
+                        ),na.rm=T),
+  pain = mean(c(
+                                          sf_7, #21 på RAND
+                                          sf_8  #22 på RAND
+                        ),na.rm=T),
+  general_health = mean(c(
+                                          sf_1,     #01 på RAND
+                                          sf_11_a,  #33 på RAND
+                                          sf_11_b,  #34 på RAND
+                                          sf_11_c,  #35 på RAND
+                                          sf_11_d   #36 på RAND
+                        ),na.rm=T)
+)%>%
+  relocate(id,timepoint,physical_function,role_limitations_physical_health,role_limitations_emotional_health,energy_fatigue,emotional_well_being,social_functioning,pain,general_health)
+
+
+
+```
+
+## SF-36 conversion to aggregate scores
+
+We'll be using this guide:
+
+https://www.researchgate.net/profile/John-Ware-6/publication/292390260_SF-36_Physical_and_Mental_Health_Summary_Scales_a_User%27s_Manual/links/5af580264585157136caee31/SF-36-Physical-and-Mental-Health-Summary-Scales-a-Users-Manual.pdf
+
+```{r eval=F}
+SF36USMeansSD<-read_excel(here("Input/SF36USPOPMEANSD.xlsx"))
+rownames(SF36USMeansSD)<-SF36USMeansSD$...1
+
+#SF36USMeansSD$Mean
+
+SF.36.Zscores <- SF_36_recoded%>%select(id,timepoint,
+                      physical_function,
+                      role_limitations_physical_health,
+                      role_limitations_emotional_health,
+                      energy_fatigue,
+                      emotional_well_being,
+                      social_functioning,
+                      pain,
+                      general_health)%>%mutate(
+                        z_PF = (physical_function - SF36USMeansSD$Mean[1]) / SF36USMeansSD$SD[1],
+                        z_RP = (role_limitations_physical_health - SF36USMeansSD$Mean[2]) / SF36USMeansSD$SD[2],
+                        z_BP = (pain - SF36USMeansSD$Mean[3]) / SF36USMeansSD$SD[3],
+                        z_GH = (general_health - SF36USMeansSD$Mean[4]) / SF36USMeansSD$SD[4],
+                        z_VT = (energy_fatigue - SF36USMeansSD$Mean[5]) / SF36USMeansSD$SD[5],
+                        z_SF = (social_functioning - SF36USMeansSD$Mean[6]) / SF36USMeansSD$SD[6],
+                        z_RE = (role_limitations_emotional_health - SF36USMeansSD$Mean[7]) / SF36USMeansSD$SD[7],
+                        z_MH = (emotional_well_being - SF36USMeansSD$Mean[8]) / SF36USMeansSD$SD[8],
+                        
+                      )%>%mutate(
+                        aggregated.physical.score = 
+                          z_PF * 0.42402 + 
+                          z_RP * 0.35119 + 
+                          z_BP * 0.31754 + 
+                          z_GH * 0.24954 + 
+                          z_VT * 0.02877 + 
+                          z_SF * -0.00753 +
+                          z_RE * -0.19206 +
+                          z_MH * -0.22069,
+                        aggregated.mental.score = 
+                          z_PF * -0.22999 + 
+                          z_RP * -0.12329 + 
+                          z_BP * -0.09731 + 
+                          z_GH * -0.01571 + 
+                          z_VT * 0.23534 + 
+                          z_SF * 0.25876 +
+                          z_RE * 0.43407 +
+                          z_MH * 0.48581 
+                      )%>%mutate(
+                        physical.component.score = 50 + aggregated.physical.score*10,
+                        mental.component.score = 50 + aggregated.mental.score*10
+                      )
+
+
+SF_36_recoded<-SF.36.Zscores %>% select(id,timepoint,physical.component.score,mental.component.score) %>% merge(SF_36_recoded)
+
+
+group_cytokine<-read_excel(path= here("Data","grouping_cytokine.xlsx"))
+
+SF_36_group<-merge(SF_36_recoded,group_cytokine,by=c("id","treatment"))%>%
+  relocate(id, timepoint, treatment,
+           m_1_2,
+           physical.component.score, mental.component.score,
+           physical_function, role_limitations_physical_health, role_limitations_emotional_health, energy_fatigue, emotional_well_being, social_functioning, pain, general_health)
+
+```
+
+## Main Model Fatigue
+
+```{r}
+model1.fatigue.lmm<-lmm(
+  formula = fatigue.mean ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+summary(model1.fatigue.lmm)
+plot(model1.fatigue.lmm, type=c("qqplot"))
+plot(model1.fatigue.lmm, type=c("scatterplot"))
+
+questionnaires.data.no.outlier<-questionnaires.combined.data%>%filter(id!="lup_001")
+
+model1.fatigue.lmm.no.outlier<-lmm(
+  formula = fatigue.mean ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.data.no.outlier
+)
+summary(model1.fatigue.lmm.no.outlier)
+
+
+model2.interaction.fatigue.lmm<-lmm(
+  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+summary(model2.interaction.fatigue.lmm)
+
+model2.interaction.fatigue.lmm.no.outlier<-lmm(
+  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.data.no.outlier
+)
+
+summary(model2.interaction.fatigue.lmm.no.outlier)
+
+model2.fatigue.el.sherb.lmm<-lmm(
+  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ ifn_1_el_sherb+treat:timepoint:ifn_1_el_sherb+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+summary(model2.fatigue.el.sherb.lmm)
+
+
+#library(lme4)
+#lmmodel1 <- lmer(
+#  kondital ~ timepoint+treat+treat:timepoint+sex + (1|id),
+#                 data=vo2max.data, 
+#  REML=T)
+#summary(lmmodel1)
+#plot(lmmodel1)
+#Anova(lmmodel1, type=3)
+
+#lmmodel2 <- lmer(
+#  kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex + (1|id),
+#                 data=vo2max.data, 
+#  REML=T)
+#plot(lmmodel2)
+#summary(lmmodel2)
+#Anova(lmmodel2, type =3)
+```
+These Models, above, are actually quite interesting, due to the hierarchy we established, that we first wanted to see an effect of exercise, and then wanted to explore whether that effect was caused by a difference in IFN-Genesignature (such as M_1_2). We end up having no significant effect.
+This is because the group, as a whole gains little improvement, or only a tendency towards lower fatigue with exercise. While there seems to be a benefit in those with a lower m_1_2 z-score than those with high m_1_2 z-score.
+This is, however, largely driven by a single outlier.
+
+##Let's use a for loop to look at the other IFN-signatures
+```{r}
+#this checks the other interferon signatures, tnf signature and IL-6 signature, which must be seen as exploratory models.
+list_of_scores_to_see_differences_over <- c(
+  "m_1_2", 
+  "m_1_2_geomean",
+  "m_3_4", 
+  "m_3_4_geomean",
+  "m_5_12", 
+  "m_5_12_geomean",
+  "ifn_1_el_sherb", 
+  "ifn_1_el_sherb_geomean",
+  "ifn_2_el_sherb", 
+  "ifn_2_el_sherb_geomean",
+  "tnf_related", 
+  "tnf_related_geomean",
+  "il_6_related", 
+  "il_6_related_geomean")
+
+for (IFNsig in list_of_scores_to_see_differences_over){
+model2.interaction.fatigue.lmm<-lmm(
+  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+                        response="fatigue.mean"),
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+summary(model2.interaction.fatigue.lmm)
+plot(model2.interaction.fatigue.lmm, type=c("qqplot"))
+plot(model2.interaction.fatigue.lmm, type=c("scatterplot"))
+
+}
+  
+```
+
+
+
+## graphics
+
+```{r}
+## Graphics on change scores:
+library(tidyr)
+fatigue.data.wide<-questionnaires.combined.data %>% select(id, treatment, timepoint,
+                                         fatigue.mean, sex, m_1_2, m_1_2_geomean, m_3_4, m_3_4_geomean, m_5_12, m_5_12_geomean, ifn_1_el_sherb, ifn_1_el_sherb_geomean, ifn_2_el_sherb, ifn_2_el_sherb_geomean, ifn_2_siddiqi, ifn_2_siddiqi_geomean)%>% pivot_wider(
+  names_from = "timepoint",
+  id_cols = c("id", "treatment", "sex", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
+  values_from = c("fatigue.mean")
+)%>%mutate(
+  delta_fatigue = followup-baseline)
+
+fatigue_by_m.1.2 <- ggplot(fatigue.data.wide, aes(x = m_1_2, y = delta_fatigue, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+fatigue_by_m.1.2
+
+model.delta.fatigue<-lm(delta_fatigue ~ sex + m_1_2 * treatment, data = fatigue.data.wide)
+plot(model.delta.fatigue)
+summary(model.delta.fatigue)
+
+fatigue.data.wide.no.outlier <- fatigue.data.wide%>%filter(id!="lup_001") #lup001 did probably not understand the questionnaire
+fatigue_by_m.1.2_no_outlier <- ggplot(fatigue.data.wide.no.outlier, aes(x = m_1_2, y = delta_fatigue, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw()
+fatigue_by_m.1.2_no_outlier
+#ggplotly(fatigue_by_m.1.2)
+
+model.delta.fatigue.no.outlier<-lm(delta_fatigue ~ sex + m_1_2 * treatment, data = fatigue.data.wide.no.outlier)
+plot(model.delta.fatigue.no.outlier)
+summary(model.delta.fatigue.no.outlier)
+```
+
+## SF-36 aggregate score models
+```{r}
+model1.SF36Physical.lmm<-lmm(
+  formula = physical.component.score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model1.SF36Physical.lmm, type=c("qqplot"))
+plot(model1.SF36Physical.lmm, type=c("scatterplot"))
+summary(model1.SF36Physical.lmm)
+
+
+
+model2.interaction.SF36Physical.lmm<-lmm(
+  formula = physical.component.score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model2.interaction.SF36Physical.lmm, type=c("qqplot"))
+plot(model2.interaction.SF36Physical.lmm, type=c("scatterplot"))
+summary(model2.interaction.SF36Physical.lmm)
+
+#effects(model2.interaction.SF36Physical.lmm, variable = "treat") #@Julie: I can't get the effects.lmm to show anything useful, is there a problem in the package or am I just doing silly things with it? I assume it should behave like an EMMEANS object?
+
+model1.SF36Mental.lmm<-lmm(
+  formula = mental.component.score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model1.SF36Mental.lmm, type=c("qqplot"))
+plot(model1.SF36Mental.lmm, type=c("scatterplot"))
+summary(model1.SF36Mental.lmm)
+
+
+
+model2.interaction.SF36Mental.lmm<-lmm(
+  formula = mental.component.score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model2.interaction.SF36Mental.lmm, type=c("qqplot"))
+plot(model2.interaction.SF36Mental.lmm, type=c("scatterplot"))
+summary(model2.interaction.SF36Mental.lmm)
+#Minor but statistically significant difference in mental well being based on m_1_2 scores
+```
+##SF-36 loop of exploratory Cytokine transcriptomic Scores.
+I'm unsure on how I should interpret these results, the difference Z-scores all seem to correlate in some way with the SF_36_Output, but it should definitely be FDR corrected. 
+```{r}
+for (IFNsig in list_of_scores_to_see_differences_over){
+model2.interaction.physical.lmm<-lmm(
+  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+                        response="physical.component.score"),
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+summary(model2.interaction.physical.lmm)
+plot(model2.interaction.physical.lmm, type=c("qqplot"))
+plot(model2.interaction.physical.lmm, type=c("scatterplot"))
+
+model2.interaction.mental.lmm<-lmm(
+  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+                        response="mental.component.score"),
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+summary(model2.interaction.mental.lmm)
+plot(model2.interaction.mental.lmm, type=c("qqplot"))
+plot(model2.interaction.mental.lmm, type=c("scatterplot"))
+
+}
+```
+
+
+## Q-Slaq scores
+```{r}
+model1.Qslaq.lmm<-lmm(
+  formula = qslaq_score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model1.Qslaq.lmm, type=c("qqplot"))
+plot(model1.Qslaq.lmm, type=c("scatterplot"))
+summary(model1.Qslaq.lmm)
+
+
+
+model2.interaction.Qslaq.lmm<-lmm(
+  formula = qslaq_score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model2.interaction.Qslaq.lmm, type=c("qqplot"))
+plot(model2.interaction.Qslaq.lmm, type=c("scatterplot"))
+summary(model2.interaction.Qslaq.lmm)
+
+
+model1.QslaqSymptom.lmm<-lmm(
+  formula = qslaq_symptom_score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model1.QslaqSymptom.lmm, type=c("qqplot"))
+plot(model1.QslaqSymptom.lmm, type=c("scatterplot"))
+summary(model1.QslaqSymptom.lmm)
+
+
+
+model2.interaction.QslaqSymptom.lmm<-lmm(
+  formula = qslaq_symptom_score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+
+plot(model2.interaction.QslaqSymptom.lmm, type=c("qqplot"))
+plot(model2.interaction.QslaqSymptom.lmm, type=c("scatterplot"))
+summary(model2.interaction.QslaqSymptom.lmm)
+#Minor but statistically significant difference in mental well being based on m_1_2 scores
+```
+
