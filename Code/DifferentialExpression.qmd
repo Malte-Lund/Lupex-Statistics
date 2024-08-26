@@ -61,7 +61,9 @@ genecols<-colnames(data)[15:826] #Before running the next code block, remember t
 ```
 
 ## Intense Loop of gene expression
+
 This for loop is quite intensive, it creates a linear mixed effect model for each gene and creates a log2fold change.
+
 ```{r eval = F}
 
 #Create dataframe to populate:
@@ -109,8 +111,11 @@ saveRDS(differentialexpression, file = here("Output","DifferentialExpression",
 #conditional = c("treat"), repetition = "Followup")
 
 ```
+
 ## Shortcut
+
 Instead the output of that code can be loaded with this
+
 ```{r eval = T}
 sumry_model<-readRDS(file = here("Output","DifferentialExpression",
                                  paste0("Summary_LMM_Genes",
@@ -124,7 +129,9 @@ differentialexpression <- readRDS(file = here("Output","DifferentialExpression",
 
 #p.adjust(p, method = p.adjust.methods, n = length(p))
 ```
+
 ## Adjusted P-Values by FDR
+
 ```{r}
 differentialexpression$p_adjust_FDR <- p.adjust(differentialexpression$p_interaction, method = "fdr")
 #As all these are the same value, I assume there is no meaningful difference. Maybe I should have done a poisson regression ??
@@ -174,9 +181,11 @@ volcano_plot_adj<- differentialexpression%>%ggplot(aes(
 volcano_plot_adj #This plot is a bit boring, but more true, most of what happens is probably noise.. 
 
 ```
+
 # Principal component analysis
+
 Linear mixed model on principle components
+
 ```{r}
 
 ```
-

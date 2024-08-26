@@ -56,7 +56,11 @@ dietaryregistration<-data.frame(id, files, date, timepoint, energy_kJ, fat_g, ca
 ```
 
 ## For loop to create calculate the intake per day
+
 ```{r}
+
+files <- dir(path=here("Data","Kostregistreringer fra Vitakost"))[excelfile]
+
 for (file in files){
 data<-read_excel(path=here("Data","Kostregistreringer fra Vitakost",file))
 
@@ -85,6 +89,7 @@ write_xlsx(x=dietsummaries,
            path=here("Data","DietaryReports.xlsx"))
 
 ```
+
 # Choose PP or mITT
 
 ```{r}
@@ -93,6 +98,7 @@ PP = F
 ```
 
 # Combine the dataset
+
 ```{r}
 dietsummaries_loaded<-read_excel(path=here("Data","DietaryReports.xlsx"))%>%
   mutate(id=to_snake_case(id))
@@ -116,6 +122,7 @@ diet_group<-left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%mut
   )
 
 ```
+
 ## Models for Energy, Fat, Carbohydrate, Protein, Alcohol intake changes by intervention:
 
 ```{r}
@@ -177,6 +184,7 @@ plot(model1.alcohol.lmm, type = "qqplot")
 ```
 
 ##Models with m_1_2 interaction
+
 ```{r}
 
 model2.energy.m12.lmm<-lmm(
@@ -233,7 +241,98 @@ summary(model2.alcohol.m12.lmm)
 plot(model2.alcohol.m12.lmm, type = "scatterplot")
 plot(model2.alcohol.m12.lmm, type = "qqplot")
 #anova(model2.alcohol.m12.lmm)
+```
+
+## Analysis of Body Composition Changes
+
+```{r}
+treat.data <- read_excel(path =  here("Data","vo2max_mITT.xlsx"))%>%dplyr::select(
+                                                        id,sex, treatment
+                                                      )
+treat.data<-treat.data[!duplicated(treat.data), ]
+
+anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.",
+                                         ifelse(mITT,"mITT",
+                                          ifelse(PP, "PP","")),".data .xlsx")))%>%
+  mutate(timepoint=case_when(
+    task_name == "Visit 5 - Follow-Up" ~ "followup",
+    task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
+     grepl("Baseline",task_name) ~ "baseline"))%>%
+  dplyr::select(id, treatment,sex,timepoint, mITT, PP, 
+                højde, weight, taljeomkreds, 
+                hvilepuls,
+                etnisk_oprindelse, etnicitet_anden, 
+                systolisk_bt, diastolisk_bt,
+                sle_start_dato,
+                medicin_ændringer_siden_baseline,
+                tidligere_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
+                aktuel_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
+                relevant_hvilket,
+                hvilket_medicin_anden_relevant,
+                hvilket_medicin_anden_relevant_001,
+                hvilket_medicin_002,
+                rituximab, dosis_rtx, seneste_rtx, 
+                cyklofosfamid, dosis_cyclo,senest_cyclo, 
+                andet_medicin, hvilket_andet, dosis_andet,
+                andet_med_2, hvilket_andet_med_2, andet_med_dosis,
+                andet_med_3, hvilket_andet_med_3, dosis_andet_med_3,
+                andet_med_4, hvilket_andet_med_4, dosis_andet_med_4
+                )%>%mutate(
+                  height = højde,
+  waist_circumference = taljeomkreds,
+  resting_pulse=hvilepuls,
+  ethnicity = case_when(
+    etnisk_oprindelse == 0 ~ "Caucasian",
+    etnisk_oprindelse == 1 ~ "Asian",
+    etnisk_oprindelse == 2 ~ case_when(
+      etnicitet_anden == "mellemøsten" ~ "Middle-Eastern",
+      etnicitet_anden == "Afrikaner" ~ "African",
+      etnicitet_anden == "Argentina" ~ "Latin America",
+      etnicitet_anden == "Iran" ~ "Middle-Eastern",
+      T ~ NA_character_
+    ),
+      id              == "lup_014" ~ "Caucasian",
+    T~NA_character_
+  ),
+  .keep="all")%>%dplyr::select(-c(
+    højde, taljeomkreds
+  ))%>%left_join(group_cytokine, by=join_by(id))%>%
+  left_join(treat.data, by=join_by(id, sex))%>%
+  mutate(
+    WHR = waist_circumference/height,
+    bmi=weight/(height/100)^2,
+    treat = case_when(
+      timepoint == "baseline" ~ "Pingvin",
+      timepoint == "screeing" ~ "Pingvin",
+      T~treatment
+    )
+  )
+
 
 ```
 
+##Model on BMI, WHR and Weight
+```{r}
+model1.bmi.lmm<-lmm(
+  formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.bmi.lmm)
+plot(model1.bmi.lmm, type = "scatterplot")
+plot(model1.bmi.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model1.bmi.lmm.m12.lmm<-lmm(
+  formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.bmi.lmm.m12.lmm)
+plot(model1.bmi.lmm.m12.lmm, type = "scatterplot")
+plot(model1.bmi.lmm.m12.lmm, type = "qqplot")
+#anova(model2.fat.m12.lmm)
+```
 

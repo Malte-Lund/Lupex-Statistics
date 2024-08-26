@@ -1,0 +1,153 @@
+---
+title: "Analysis_of_ActivityMeasures"
+format: html
+editor: visual
+---
+
+## Packages
+
+```{r}
+library(renv)
+library("readxl")
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(table1)
+library(LMMstar)
+set.seed(42069)
+```
+
+## Load Data
+
+```{r}
+library(readr)
+AX3_Post_Back_PersonSummary <- 
+  read_csv(here("Output",
+                "AX3",
+                "Post Back",
+                "output_Post Back",
+                "results",
+                "part5_personsummary_WW_L40M100V400_T5A5.csv"))%>%mutate(
+                  timepoint = "followup",
+                  location = "back"
+                )
+
+AX3_Post_Thigh_PersonSummary <- 
+  read_csv(here("Output",
+                "AX3",
+                "Post Thigh",
+                "output_Post Thigh",
+                "results",
+                "part5_personsummary_WW_L40M100V400_T5A5.csv"))%>%mutate(
+                  timepoint = "followup",
+                  location = "thigh"
+                )
+
+AX3_Pre_Back_PersonSummary <- 
+  read_csv(here("Output",
+                "AX3",
+                "Pre Back",
+                "output_Pre Back",
+                "results",
+                "part5_personsummary_WW_L40M100V400_T5A5.csv"))%>%mutate(
+                  timepoint = "baseline",
+                  location = "back"
+                )
+
+AX3_Pre_Thigh_PersonSummary <- 
+  read_csv(here("Output",
+                "AX3",
+                "Pre Thigh",
+                "output_Pre Thigh",
+                "results",
+                "part5_personsummary_WW_L40M100V400_T5A5.csv"))%>%mutate(
+                  timepoint = "baseline",
+                  location = "thigh"
+                )
+
+AX3_Data.Frame<-bind_rows(AX3_Pre_Thigh_PersonSummary, 
+                          AX3_Pre_Back_PersonSummary, 
+                          AX3_Post_Thigh_PersonSummary,
+                          AX3_Post_Back_PersonSummary)%>%mutate(
+                            duration_daily_MVPA_pla = dur_day_total_MOD_min_pla + dur_day_total_VIG_min_pla,
+                            id = to_snake_case(ID)
+                          )%>%relocate(id, timepoint, location, 
+                                       calendar_date, startday,
+                                       dur_spt_min_pla,
+                                       dur_day_total_IN_min_pla, dur_day_total_LIG_min_pla, duration_daily_MVPA_pla, dur_day_total_MOD_min_pla, dur_day_total_VIG_min_pla)
+
+group_cytokine<-read_excel(path = here("Data","grouping_cytokine.xlsx"))
+
+AX3_group<-AX3_Data.Frame %>%left_join(group_cytokine, by=join_by(id))%>%mutate(
+  treat = case_when(
+    timepoint == "baseline" ~ "Pingvin",
+    timepoint == "followup" ~ treatment,
+    T~NA_character_
+  )
+)%>%relocate(
+  id, treat, timepoint, location, duration_daily_MVPA_pla, m_1_2
+)
+
+
+sex.data <- read_excel(path =  here("Data","vo2max_mITT.xlsx"))%>%dplyr::select(
+                                                        id,sex
+                                                      )
+sex.data<-sex.data[!duplicated(sex.data), ]
+
+AX3_group<-AX3_group%>%left_join(sex.data, by=join_by(id))
+
+
+AX3_back <- AX3_group %>%dplyr::filter(location == "back")
+```
+
+## Linear Mixed Model of MVPA
+
+```{r}
+model1.MVPA.back.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = AX3_back
+)
+
+summary(model1.MVPA.back.lmm)
+plot(model1.MVPA.back.lmm, type = "scatterplot")
+plot(model1.MVPA.back.lmm, type = "qqplot")
+
+model2.MVPA.back.m12.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = AX3_back
+)
+summary(model2.MVPA.back.m12.lmm)
+plot(model2.MVPA.back.m12.lmm, type = "scatterplot")
+plot(model2.MVPA.back.m12.lmm, type = "qqplot")
+
+## Model with both back and thigh measurements??
+model1.MVPA.backorthigh.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint*location|id,
+  structure = "UN",
+  data = AX3_group
+)
+
+summary(model1.MVPA.backorthigh.lmm)
+plot(model1.MVPA.backorthigh.lmm, type = "scatterplot")
+plot(model1.MVPA.backorthigh.lmm, type = "qqplot")
+
+model2.MVPA.backorthigh.m12.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint*location|id,
+  structure = "UN",
+  data = AX3_group
+)
+summary(model2.MVPA.backorthigh.m12.lmm)
+plot(model2.MVPA.backorthigh.m12.lmm, type = "scatterplot")
+plot(model2.MVPA.backorthigh.m12.lmm, type = "qqplot")
+
+```
+

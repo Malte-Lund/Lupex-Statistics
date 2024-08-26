@@ -7,6 +7,7 @@ editor: visual
 ## Packages
 
 ```{r}
+library(renv)
 library(readxl)
 library(dplyr)
 library(here)
@@ -74,6 +75,7 @@ sss2 <- summarize(kondital ~ treatment+timepoint|id, data = vo2max.data, na.rm =
 print(sss2, digits = 3)
 
 plot(sss2, type = "mean") ## left panel
+plot(sss2)
 plot(sss2, type = "sd") ## middle panel
 plot(sss2, type = "cor") ## right panel
 ```
@@ -107,6 +109,23 @@ plot(model2.kondital.lmm, type = "qqplot")
 
 effects(model2.kondital.lmm, variable = NULL)
 effects(model2.kondital.lmm, variable = "treat")
+
+
+model2.kondital.lmm.outlier.removal<-
+  lmm(
+  formula = kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data%>%
+  filter(m_1_2<11.6)
+)
+
+summary(model2.kondital.lmm.outlier.removal)
+plot(model2.kondital.lmm.outlier.removal, type = "scatterplot")
+plot(model2.kondital.lmm.outlier.removal, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+
 
 model3.kondital.m.1.2.sexinteract.lmm<-lmm(
   formula = kondital ~ timepoint+treat+treat:timepoint:sex+ m_1_2+treat:timepoint:m_1_2:sex,
@@ -202,8 +221,52 @@ summary(model.noscreen.kondital.lmm)
 plot(model.noscreen.kondital.lmm, type = "scatterplot")
 plot(model.noscreen.kondital.lmm, type = "qqplot")
 
+model2.interaction.m12.noscreen.kondital.lmm<-lmm(
+  formula = kondital ~ timepoint+treat:timepoint+m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data.no.screen
+)
+summary(model2.interaction.m12.noscreen.kondital.lmm)
+plot(model2.interaction.m12.noscreen.kondital.lmm, type = "scatterplot")
+plot(model2.interaction.m12.noscreen.kondital.lmm, type = "qqplot")
+
 
 ```
+
+## Søren J asks, since this is a z-score is the effect only on those with a z-score higher than 2.
+
+So we'll make that analysis as an exploratory measure, but we are throwing out a lot of data.
+
+```{r}
+vo2max.data.high.m.1.2 <- vo2max.data %>% filter(m_1_2>2)
+
+model.high.m.1.2.kondital.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data.high.m.1.2
+)
+summary(model.high.m.1.2.kondital.lmm)
+plot(model.high.m.1.2.kondital.lmm, type = "scatterplot")
+plot(model.high.m.1.2.kondital.lmm, type = "qqplot")
+
+model2.interaction.m12.high.m.1.2.kondital.lmm<-lmm(
+  formula = kondital ~ timepoint+treat:timepoint+m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data.high.m.1.2
+)
+summary(model2.interaction.m12.high.m.1.2.kondital.lmm)
+plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "scatterplot")
+plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "qqplot")
+plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "fit", facet=~sex)
+
+plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "fit")
+plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "partial", type.residual = c("(Intercept)","treat","timepoint"))
+```
+
+So the interaction is stronger in that case. Which is quite interesting.
 
 ## Graphics
 
@@ -243,7 +306,9 @@ vo2max.data.wide<-vo2max.data %>% select(id, treatment, timepoint,
   delta_kondi = round(kondital_followup-(kondital_screening+kondital_baseline)/2,2),
   delta_vo2max = round(vo_2_max_followup -(vo_2_max_screening+vo_2_max_baseline)/2,1),
   delta_kondi_BLFU = kondital_followup - kondital_baseline,
-  delta_vo2max_BLFU = vo_2_max_followup - vo_2_max_baseline
+  delta_vo2max_BLFU = vo_2_max_followup - vo_2_max_baseline,
+  delta_kondi_SCFU = kondital_followup - kondital_screening,
+  delta_vo2max_SCFU = vo_2_max_followup - vo_2_max_screening
 )
 
 kondi_by_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi, colour = treatment)) +
@@ -278,6 +343,14 @@ kondi_BLFU_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi_BLFU
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
         theme_bw()
 
+kondi_BLFU_m.1.2
+
+kondi_SCFU_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi_BLFU, colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw()
+
+kondi_SCFU_m.1.2
+
 
 vo2_by_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_vo2max, colour = treatment)) +
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
@@ -305,7 +378,7 @@ vo2max.data.wide.forwaterfall$id = factor(vo2max.data.wide.forwaterfall$id,
                                                    vo2max.data.wide.forwaterfall$id) #add ordered factors back
 g<-ggplot(vo2max.data.wide.forwaterfall) + 
 geom_bar(stat="identity", aes(x=id, y=delta_kondi,
-                              fill=treatment))
+                              fill=treatment, label = m_1_2))
 ggplotly(g)
 g
 
@@ -315,9 +388,34 @@ vo2max.data.wide.forwaterfall$id = factor(vo2max.data.wide.forwaterfall$id,
                                                    vo2max.data.wide.forwaterfall$id) #add ordered factors back
 g<-ggplot(vo2max.data.wide.forwaterfall) + 
 geom_bar(stat="identity", aes(x=id, y=delta_vo2max,
-                              fill=treatment))
+                              fill=treatment, label = m_1_2))
+g
+
+
+ggplotly(g)
+
+vo2max.data.wide.forwaterfall.arr.m.1.2 <- vo2max.data.wide %>% filter(!is.na(delta_vo2max))%>% arrange(-m_1_2)
+vo2max.data.wide.forwaterfall.arr.m.1.2$id <- as.vector(stringr::str_sub(vo2max.data.wide.forwaterfall$id,start = 1)) #get rid of factors
+vo2max.data.wide.forwaterfall.arr.m.1.2$id = factor(vo2max.data.wide.forwaterfall.arr.m.1.2$id,
+                                                   vo2max.data.wide.forwaterfall.arr.m.1.2$id) #add ordered factors back
+g<-ggplot(vo2max.data.wide.forwaterfall.arr.m.1.2) + 
+geom_bar(stat="identity", aes(x=id, y=delta_vo2max,
+                              fill=treatment, label = m_1_2))
+g
+
+
+ggplotly(g)
+
+vo2max.data.wide.forwaterfall.arr.m.1.2 <- vo2max.data.wide %>% filter(!is.na(delta_vo2max))%>% arrange(m_1_2)
+vo2max.data.wide.forwaterfall.arr.m.1.2$id <- as.vector(stringr::str_sub(vo2max.data.wide.forwaterfall$id,start = 1)) #get rid of factors
+vo2max.data.wide.forwaterfall.arr.m.1.2$id = factor(vo2max.data.wide.forwaterfall.arr.m.1.2$id,
+                                                   vo2max.data.wide.forwaterfall.arr.m.1.2$id) #add ordered factors back
+g<-ggplot(vo2max.data.wide.forwaterfall.arr.m.1.2) + 
+geom_bar(stat="identity", aes(x=id, y=delta_kondi,
+                              fill=treatment, label = m_1_2))
 g
 
 
 ggplotly(g)
 ```
+

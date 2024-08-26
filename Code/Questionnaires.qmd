@@ -10,6 +10,7 @@ editor: visual
 ## Packages and options
 
 ```{r}
+library(renv)
 library(readxl)
 library(dplyr)
 library(here)
@@ -24,13 +25,16 @@ library(plotly)
 #use_targets()
 set.seed(42069)
 ```
+
 ## Choose mITT or PP (or ITT by leaving both F)
+
 ```{r}
 mITT = T
 PP = F
 ```
 
 Load data
+
 ```{r}
 questionnaires.combined.data<-read_excel(path = here("Output",paste0(
                        "Questionnaires_combined",
@@ -38,12 +42,10 @@ questionnaires.combined.data<-read_excel(path = here("Output",paste0(
                        ".xlsx")))
 ```
 
-
-#These first few paragraphs have been moved to the DataWrangling.qmd
-##Load questionnaires, create fatigue score
+#These first few paragraphs have been moved to the DataWrangling.qmd ##Load questionnaires, create fatigue score
 
 ```{r eval = F}
-questionnaires <- read_xlsx(path=here("Data/easy_trial_seperate_schemes/_g_visit__spørgeskemaer.mITT.data .xlsx"))%>%mutate(
+questionnaires <- read_excel(path=here("Data/easy_trial_seperate_schemes/_g_visit__spørgeskemaer.mITT.data .xlsx"))%>%mutate(
   timepoint=
   case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
@@ -54,8 +56,8 @@ questionnaires <- read_xlsx(path=here("Data/easy_trial_seperate_schemes/_g_visit
 )%>%filter(!is.na(timepoint))%>%mutate(
   id = to_snake_case(allocation_no),
   treat = case_when(
-    timepoint == "baseline" ~ "Pingvin",
-    timepoint == "screening" ~ "Pingvin",
+    timepoint == "baseline" ~ "pingvin",
+    timepoint == "screening" ~ "pingvin",
     timepoint == "followup" ~ treatment,
     T~NA_character_
   ))%>%mutate(
@@ -350,11 +352,11 @@ summary(model2.fatigue.el.sherb.lmm)
 #summary(lmmodel2)
 #Anova(lmmodel2, type =3)
 ```
-These Models, above, are actually quite interesting, due to the hierarchy we established, that we first wanted to see an effect of exercise, and then wanted to explore whether that effect was caused by a difference in IFN-Genesignature (such as M_1_2). We end up having no significant effect.
-This is because the group, as a whole gains little improvement, or only a tendency towards lower fatigue with exercise. While there seems to be a benefit in those with a lower m_1_2 z-score than those with high m_1_2 z-score.
-This is, however, largely driven by a single outlier.
+
+These Models, above, are actually quite interesting, due to the hierarchy we established, that we first wanted to see an effect of exercise, and then wanted to explore whether that effect was caused by a difference in IFN-Genesignature (such as M_1_2). We end up having no significant effect. This is because the group, as a whole gains little improvement, or only a tendency towards lower fatigue with exercise. While there seems to be a benefit in those with a lower m_1_2 z-score than those with high m_1_2 z-score. This is, however, largely driven by a single outlier.
 
 ##Let's use a for loop to look at the other IFN-signatures
+
 ```{r}
 #this checks the other interferon signatures, tnf signature and IL-6 signature, which must be seen as exploratory models.
 list_of_scores_to_see_differences_over <- c(
@@ -389,8 +391,6 @@ plot(model2.interaction.fatigue.lmm, type=c("scatterplot"))
 }
   
 ```
-
-
 
 ## graphics
 
@@ -428,6 +428,7 @@ summary(model.delta.fatigue.no.outlier)
 ```
 
 ## SF-36 aggregate score models
+
 ```{r}
 model1.SF36Physical.lmm<-lmm(
   formula = physical.component.score ~ timepoint+treat:timepoint+sex,
@@ -480,8 +481,9 @@ plot(model2.interaction.SF36Mental.lmm, type=c("scatterplot"))
 summary(model2.interaction.SF36Mental.lmm)
 #Minor but statistically significant difference in mental well being based on m_1_2 scores
 ```
-##SF-36 loop of exploratory Cytokine transcriptomic Scores.
-I'm unsure on how I should interpret these results, the difference Z-scores all seem to correlate in some way with the SF_36_Output, but it should definitely be FDR corrected. 
+
+##SF-36 loop of exploratory Cytokine transcriptomic Scores. I'm unsure on how I should interpret these results, the difference Z-scores all seem to correlate in some way with the SF_36_Output, but it should definitely be FDR corrected.
+
 ```{r}
 for (IFNsig in list_of_scores_to_see_differences_over){
 model2.interaction.physical.lmm<-lmm(
@@ -511,8 +513,8 @@ plot(model2.interaction.mental.lmm, type=c("scatterplot"))
 }
 ```
 
-
 ## Q-Slaq scores
+
 ```{r}
 model1.Qslaq.lmm<-lmm(
   formula = qslaq_score ~ timepoint+treat:timepoint+sex,

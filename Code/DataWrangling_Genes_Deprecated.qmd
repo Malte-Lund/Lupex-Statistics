@@ -1,0 +1,467 @@
+---
+title: "DataWranglingGenes(deprecated)"
+format: html
+editor: visual
+---
+
+# Data Wrangling for analysis of all genes
+
+Using suggestions from Kanwal Siddiqi - we do this in a seperate document
+
+```{r eval = F}
+nanostring_norm
+
+diffex.data<-nanostring_norm %>%  dplyr::select(!c("Class Name", 
+                   "Probe Name",
+                    BX0616_014, 
+                    BX0616_103,  
+                    BX0616_110))%>%as.data.frame()
+
+rownames(diffex.data) <- nanostring_norm$`Probe Name`
+
+
+
+#PVals_ExFUvsNoExFu <- apply(nanostring_norm[-1],1,function(x) t.test(x[exercisers],x[nonexercisers]))
+```
+
+## Using RNASEQ2 package.
+
+--- I can't get the below code to work. I think I will try making my own above and not evaluating this. #TODO
+
+https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#standard-workflow
+
+Love, M.I., Huber, W., Anders, S. (2014) Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. *Genome Biology*, **15**:550. [10.1186/s13059-014-0550-8](http://dx.doi.org/10.1186/s13059-014-0550-8)
+
+https://www.biorxiv.org/content/10.1101/2020.04.08.032490v3.full.pdf
+
+```{r warning=F}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+#install.packages("fastmap", force = T)
+library(fastmap)
+
+#BiocManager::install("rnaseqGene")
+#browseVignettes("rnaseqGene")
+library(rnaseqGene)
+#library(tximeta)
+
+
+
+```
+
+## Create data sets
+
+```{r eval = F}
+
+
+column.data.to.remove1 <- nanostring_biox %>% 
+  dplyr::rename(id=ID)%>%
+  dplyr::select(c(BX_ID, timepoint, id)) %>%
+  mutate(id = to_snake_case(id))%>%
+  left_join(group, by = join_by(id))%>%
+  filter(timepoint=="Extra")
+
+column.data.to.remove2 <- nanostring_biox %>% 
+  dplyr::rename(id=ID)%>%
+  dplyr::select(c(BX_ID, timepoint, id)) %>%
+  mutate(id = to_snake_case(id))%>%
+  left_join(group, by = join_by(id))%>%
+  filter(is.na(treatment))
+
+count.data <- nanostring %>% 
+  dplyr::select(!c("Class Name", 
+                   "Probe Name",
+                    BX0616_014, 
+                    BX0616_103,  
+                    BX0616_110,
+                   column.data.to.remove1$BX_ID,
+                   column.data.to.remove2$BX_ID)
+                )%>%as.data.frame()
+
+rownames(count.data)<-nanostring$`Probe Name`
+
+head(count.data)
+#str(count.data)
+count.data<-as.data.frame(lapply(count.data,as.numeric))
+#str(count.data)
+
+
+column.data <- nanostring_biox %>% 
+  dplyr::rename(id=ID)%>%
+  dplyr::select(c(BX_ID, timepoint, id)) %>%
+  mutate(id = to_snake_case(id))%>%
+  left_join(group, by = join_by(id))%>%
+  filter(!is.na(treatment) )%>%
+  filter(timepoint!="Extra")
+
+
+all(colnames(count.data) == column.data$BX_ID)
+
+
+
+library("DESeq2")
+dds <- DESeqDataSetFromMatrix(countData = count.data,
+                              colData = column.data,
+                              design = ~ timepoint + timepoint:treatment)
+dds
+dds <- DESeq(dds)
+res <- results(dds)
+res
+
+summary(res)
+#View(res)
+
+plotMA(res, ylim=c(-2,2))
+```
+
+## Using DEseq for the volcanoplots
+
+```{r}
+
+
+
+#dds <- DESeqDataSetFromMatrix(countData = nanostringforvolcano,
+ #                             colData = column.data,
+  #                            design= ~ batch + condition)
+#dds <- DESeq(dds)
+#resultsNames(dds) # lists the coefficients
+#res <- results(dds, name="condition_trt_vs_untrt")
+# or to shrink log fold changes association with condition:
+#res <- lfcShrink(dds, coef="condition_trt_vs_untrt", type="apeglm")
+```
+
+## Using the Limma Package
+
+As the DEseq2 doesn't account for mixed effect models, staying more true to our original design would be having a random effect of id. This is also a boon because I have problems getting the DEseq2 to compile correctly.
+
+We are using this guide: https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html
+
+We should remember to cite this: Ritchie, ME, Phipson, B, Wu, D, Hu, Y, Law, CW, Shi, W, and Smyth, GK (2015). limma powers differential expression analyses for RNA-sequencing and microarray studies. Nucleic Acids Research 43(7), e47
+
+Also we could use this as a guideline:
+
+<https://www.researchgate.net/publication/377981363_Impact_of_modeled_microgravity_stress_on_innate_immunity_in_a_beneficial_animal-microbe_symbiosis>
+
+```{r limma dependencies, eval = F, warning = F}
+#BiocManager::install("Glimma")
+#BiocManager::install("Mus.musculus")
+library(limma)
+library(Glimma)
+library(edgeR)
+library(Mus.musculus)
+renv::update()
+```
+
+So we should build the data from the count matrix
+
+```{r eval = F}
+count.data 
+
+
+all(colnames(count.data) == column.data$BX_ID)
+
+column.data2 <- column.data %>% mutate(
+  treat = case_when(
+    timepoint == "Baseline" ~ "None",
+    treatment == "Søløve" ~ "Søløve",
+    treatment == "Pingvin" ~ "Pingvin",
+    T ~ "None"
+  )
+    ,
+  farve = case_when(
+    treat== "Søløve" ~ "Blue",
+    treat == "Pingvin" ~ "Red",
+    treat == "None" ~ "Black",
+    T~ "Black"
+  )
+)
+
+
+#get sex to id,
+sex.id <- rawdata %>% as.data.frame()%>%mutate(id=to_snake_case(allocation_no))%>% dplyr::select(id, sex) 
+sex.id <- sex.id[!duplicated(sex.id$id),]
+
+column.data2<- left_join(column.data2, sex.id)
+
+
+
+DGE.count.data <- DGEList(counts = count.data, group = column.data2$treatment)
+DGE.count.data$samples$timepoint <- column.data2$timepoint
+DGE.count.data$samples$id <- column.data2$id
+DGE.count.data$samples$sex <- column.data2$sex
+DGE.count.data$samples$treat <- column.data2$treat
+DGE.count.data$samples$treatment <- column.data2$treatment
+
+all(colnames(DGE.count.data) == column.data2$BX_ID)
+
+plotMDS(DGE.count.data, labels = column.data2$id, plot=T, col = (column.data2$farve))
+
+norm.factor.count.data <- calcNormFactors(DGE.count.data)
+DGE.count.data <- calcNormFactors(DGE.count.data)
+
+#keep.exprs <- filterByExpr(DGE.count.data, design=design)
+#x <- DGE.count.data[keep.exprs,, keep.lib.sizes=FALSE]
+#dim(x)
+
+```
+
+### LIMMA Specify the model
+
+```{r evaluate = F}
+
+norm.factor.count.data <- calcNormFactors(DGE.count.data, method ="TMM")
+all(colnames(norm.factor.count.data) == column.data$BX_ID)
+
+norm.factor.count.data$samples$norm.factors
+#TODO continue down this rabbit hole 
+design <- model.matrix(~0+timepoint+treatment+treatment*timepoint+sex,data=DGE.count.data$samples)
+colnames(design) <- gsub("group", "", colnames(design))
+design
+
+
+v<- voom(DGE.count.data, design = design, block=DGE.count.data$samples$id,plot = T)
+v
+#contr.matrix <- makeContrasts(
+ #  "Ex Vs No Ex" = treatmentSøløve, 
+  # "Followup vs Baseline" = timepointFollowup - timepointBaseline, 
+   #levels = colnames(design))
+#contr.matrix
+#getEAWP(v)
+#install.packages("statmod")
+library(statmod)
+#duplicateCorrelation(object = v, design)
+library(limma)
+library(edgeR)
+dupC <- limma::duplicateCorrelation(object = v, design = design, block = v$targets$id)
+
+vfit <- lmFit(v, correlation = dupC, design = design)
+efit <- eBayes(vfit)
+plotSA(efit, main="Final model: Mean-variance trend")
+
+cnf.DGE.count.data <- calcNormFactors(DGE.count.data)
+fit <- voomLmFit(cnf.DGE.count.data, design = design, plot=TRUE)
+fit <- eBayes(fit)
+
+volcanoplot(fit)
+```
+
+## Using RNASEQ2 package.
+
+--- I can't get the below code to work. I think I will try making my own above and not evaluating this. #TODO
+
+<https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#standard-workflow>
+
+Love, M.I., Huber, W., Anders, S. (2014) Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. *Genome Biology*, **15**:550. [10.1186/s13059-014-0550-8](http://dx.doi.org/10.1186/s13059-014-0550-8)
+
+<https://www.biorxiv.org/content/10.1101/2020.04.08.032490v3.full.pdf>
+
+```{r warning=F}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+#install.packages("fastmap", force = T)
+library(fastmap)
+
+#BiocManager::install("rnaseqGene")
+#browseVignettes("rnaseqGene")
+library(rnaseqGene)
+#library(tximeta)
+
+
+
+```
+
+## Create data sets
+
+```{r eval = F}
+
+
+column.data.to.remove1 <- nanostring_biox %>% 
+  dplyr::rename(id=ID)%>%
+  dplyr::select(c(BX_ID, timepoint, id)) %>%
+  mutate(id = to_snake_case(id))%>%
+  left_join(group, by = join_by(id))%>%
+  filter(timepoint=="Extra")
+
+column.data.to.remove2 <- nanostring_biox %>% 
+  dplyr::rename(id=ID)%>%
+  dplyr::select(c(BX_ID, timepoint, id)) %>%
+  mutate(id = to_snake_case(id))%>%
+  left_join(group, by = join_by(id))%>%
+  filter(is.na(treatment))
+
+count.data <- nanostring %>% 
+  dplyr::select(!c("Class Name", 
+                   "Probe Name",
+                    BX0616_014, 
+                    BX0616_103,  
+                    BX0616_110,
+                   column.data.to.remove1$BX_ID,
+                   column.data.to.remove2$BX_ID)
+                )%>%as.data.frame()
+
+rownames(count.data)<-nanostring$`Probe Name`
+
+head(count.data)
+#str(count.data)
+count.data<-as.data.frame(lapply(count.data,as.numeric))
+#str(count.data)
+
+
+column.data <- nanostring_biox %>% 
+  dplyr::rename(id=ID)%>%
+  dplyr::select(c(BX_ID, timepoint, id)) %>%
+  mutate(id = to_snake_case(id))%>%
+  left_join(group, by = join_by(id))%>%
+  filter(!is.na(treatment) )%>%
+  filter(timepoint!="Extra")
+
+
+all(colnames(count.data) == column.data$BX_ID)
+
+
+
+library("DESeq2")
+dds <- DESeqDataSetFromMatrix(countData = count.data,
+                              colData = column.data,
+                              design = ~ timepoint + timepoint:treatment)
+dds
+dds <- DESeq(dds)
+res <- results(dds)
+res
+
+summary(res)
+#View(res)
+
+plotMA(res, ylim=c(-2,2))
+```
+
+## Using DEseq for the volcanoplots
+
+```{r}
+
+
+
+#dds <- DESeqDataSetFromMatrix(countData = nanostringforvolcano,
+ #                             colData = column.data,
+  #                            design= ~ batch + condition)
+#dds <- DESeq(dds)
+#resultsNames(dds) # lists the coefficients
+#res <- results(dds, name="condition_trt_vs_untrt")
+# or to shrink log fold changes association with condition:
+#res <- lfcShrink(dds, coef="condition_trt_vs_untrt", type="apeglm")
+```
+
+## Using the Limma Package
+
+As the DEseq2 doesn't account for mixed effect models, staying more true to our original design would be having a random effect of id. This is also a boon because I have problems getting the DEseq2 to compile correctly.
+
+We are using this guide: <https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html>
+
+We should remember to cite this: Ritchie, ME, Phipson, B, Wu, D, Hu, Y, Law, CW, Shi, W, and Smyth, GK (2015). limma powers differential expression analyses for RNA-sequencing and microarray studies. Nucleic Acids Research 43(7), e47
+
+Also we could use this as a guideline:
+
+<https://www.researchgate.net/publication/377981363_Impact_of_modeled_microgravity_stress_on_innate_immunity_in_a_beneficial_animal-microbe_symbiosis>
+
+```{r limma dependencies, eval = F, warning = F}
+#BiocManager::install("Glimma")
+#BiocManager::install("Mus.musculus")
+library(limma)
+library(Glimma)
+library(edgeR)
+library(Mus.musculus)
+renv::update()
+```
+
+So we should build the data from the count matrix
+
+```{r eval = F}
+count.data 
+
+
+all(colnames(count.data) == column.data$BX_ID)
+
+column.data2 <- column.data %>% mutate(
+  treat = case_when(
+    timepoint == "Baseline" ~ "None",
+    treatment == "Søløve" ~ "Søløve",
+    treatment == "Pingvin" ~ "Pingvin",
+    T ~ "None"
+  )
+    ,
+  farve = case_when(
+    treat== "Søløve" ~ "Blue",
+    treat == "Pingvin" ~ "Red",
+    treat == "None" ~ "Black",
+    T~ "Black"
+  )
+)
+
+
+#get sex to id,
+sex.id <- rawdata %>% as.data.frame()%>%mutate(id=to_snake_case(allocation_no))%>% dplyr::select(id, sex) 
+sex.id <- sex.id[!duplicated(sex.id$id),]
+
+column.data2<- left_join(column.data2, sex.id)
+
+
+
+DGE.count.data <- DGEList(counts = count.data, group = column.data2$treatment)
+DGE.count.data$samples$timepoint <- column.data2$timepoint
+DGE.count.data$samples$id <- column.data2$id
+DGE.count.data$samples$sex <- column.data2$sex
+DGE.count.data$samples$treat <- column.data2$treat
+DGE.count.data$samples$treatment <- column.data2$treatment
+
+all(colnames(DGE.count.data) == column.data2$BX_ID)
+
+plotMDS(DGE.count.data, labels = column.data2$id, plot=T, col = (column.data2$farve))
+
+norm.factor.count.data <- calcNormFactors(DGE.count.data)
+DGE.count.data <- calcNormFactors(DGE.count.data)
+
+#keep.exprs <- filterByExpr(DGE.count.data, design=design)
+#x <- DGE.count.data[keep.exprs,, keep.lib.sizes=FALSE]
+#dim(x)
+
+```
+
+### LIMMA Specify the model
+
+```{r evaluate = F}
+
+norm.factor.count.data <- calcNormFactors(DGE.count.data, method ="TMM")
+all(colnames(norm.factor.count.data) == column.data$BX_ID)
+
+norm.factor.count.data$samples$norm.factors
+#TODO continue down this rabbit hole 
+design <- model.matrix(~0+timepoint+treatment+treatment*timepoint+sex,data=DGE.count.data$samples)
+colnames(design) <- gsub("group", "", colnames(design))
+design
+
+
+v<- voom(DGE.count.data, design = design, block=DGE.count.data$samples$id,plot = T)
+v
+#contr.matrix <- makeContrasts(
+ #  "Ex Vs No Ex" = treatmentSøløve, 
+  # "Followup vs Baseline" = timepointFollowup - timepointBaseline, 
+   #levels = colnames(design))
+#contr.matrix
+#getEAWP(v)
+#install.packages("statmod")
+library(statmod)
+#duplicateCorrelation(object = v, design)
+library(limma)
+library(edgeR)
+dupC <- limma::duplicateCorrelation(object = v, design = design, block = v$targets$id)
+
+vfit <- lmFit(v, correlation = dupC, design = design)
+efit <- eBayes(vfit)
+plotSA(efit, main="Final model: Mean-variance trend")
+
+cnf.DGE.count.data <- calcNormFactors(DGE.count.data)
+fit <- voomLmFit(cnf.DGE.count.data, design = design, plot=TRUE)
+fit <- eBayes(fit)
+
+volcanoplot(fit)
+```

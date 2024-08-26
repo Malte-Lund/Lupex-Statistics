@@ -18,10 +18,19 @@ library(snakecase)
 library(ggplot2)
 library(stringr)
 library(writexl)
+#renv::install("table1")
+library(table1)
+#renv::install("flextable")
+#renv::install("officer")
+library(flextable)
 #install.packages("targets")
 #library(targets)
 #use_targets()
 set.seed(42069)
+#renv::install("DescTools")
+library(DescTools)
+
+library(officer)
 
 #set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
 ```
@@ -89,6 +98,9 @@ if (PP){
     PP == 1
   )
 }
+
+#IF you have full access to the data set this to true, if you do not have full access and this is not set to false, the code will not work
+fullaccess = T
 
 ```
 
@@ -471,7 +483,7 @@ vo2max.data <- read_excel(path=
   timepoint=
   case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
-    task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
+    grepl("Visit 1 - Samtykke", task_name) ~ "screening",
      grepl("Baseline",task_name) ~ "baseline", #TODO finish this: This line is supposed to find the latest of the baseline variables and use that as the date. 
     T~NA_character_
   )
@@ -499,7 +511,7 @@ First created in the other .qmd file, but I wanted it here so I could use it whe
 
 ```{r}
 
-questionnaires <- read_xlsx(path=here("Data/easy_trial_seperate_schemes/_g_visit__spørgeskemaer.mITT.data .xlsx"))%>%mutate(
+questionnaires <- read_excel(path=here("Data/easy_trial_seperate_schemes/_g_visit__spørgeskemaer.mITT.data .xlsx"))%>%mutate(
   timepoint=
   case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
@@ -869,8 +881,9 @@ SLICC.data <- anamnese_og_objektiv_undersøgelse_baseline_followup.mITT.data %>%
       T~ NA_real_) +
       
       case_when(
-        str_detect(slicc_hematology, "4") ~ 4,
-        str_detect(slicc_hematology, "3") ~ 3,
+        str_detect(slicc_hematology, "3") ~ 4,
+        str_detect(slicc_hematology, "2") ~ 4,
+        str_detect(slicc_hematology, "1") ~ 3,
         str_detect(slicc_hematology, "0") ~ 0,
       T~ NA_real_) +
         
@@ -883,7 +896,9 @@ SLICC.data <- anamnese_og_objektiv_undersøgelse_baseline_followup.mITT.data %>%
       
     ###Immunologic Domain:
       case_when(
-        str_detect(slicc_antiphospholipids, "2") ~ 2,
+        str_detect(slicc_antiphospholipids, "4") ~ 2,
+        str_detect(slicc_antiphospholipids, "3") ~ 2,
+        str_detect(slicc_antiphospholipids, "1") ~ 2,
         str_detect(slicc_antiphospholipids, "0") ~ 0,
       T~ NA_real_) +
       
@@ -894,9 +909,157 @@ SLICC.data <- anamnese_og_objektiv_undersøgelse_baseline_followup.mITT.data %>%
       T~ NA_real_) +
       
       case_when(
-        str_detect(slicc_sle_specific_antibodies, "6") ~ 6,
+        str_detect(slicc_sle_specific_antibodies, "2") ~ 6,
+        str_detect(slicc_sle_specific_antibodies, "1") ~ 6,
         str_detect(slicc_sle_specific_antibodies, "0") ~ 0,
-      T~ NA_real_)
+      T~ NA_real_),
+    anti_DsDNA = case_when(
+       str_detect(slicc_sle_specific_antibodies, "1") ~ 1,
+       str_detect(slicc_sle_specific_antibodies, "2") ~ 0,
+       str_detect(slicc_sle_specific_antibodies, "0") ~ 0,
+       T~NA_real_
+    ),
+    anti_Smith = case_when(
+       str_detect(slicc_sle_specific_antibodies, "2") ~ 1,
+       str_detect(slicc_sle_specific_antibodies, "1") ~ 0,
+       str_detect(slicc_sle_specific_antibodies, "0") ~ 0,
+       T~NA_real_
+    ), #Below we dummy code out SLICC_categoricals
+    #fever
+    slicc_cat_fever = case_when(
+        str_detect(slicc_feber, "1") ~ TRUE,
+        str_detect(slicc_feber, "0") ~ FALSE,
+        T~NA),
+    #mucocutaneous domain
+    slicc_cat_AcuteCutLupus= case_when(
+        str_detect(slicc_mucokutan, "4") ~ TRUE,
+        T~ FALSE),
+    slicc_cat_SubAcuteCutorDiscLupus = case_when(
+        str_detect(slicc_mucokutan, "3") ~ TRUE,
+        T~ FALSE),
+    slicc_cat_OralUlcers = case_when(
+        str_detect(slicc_mucokutan, "2") ~ TRUE,
+        T~ FALSE),
+    slicc_cat_Alopecia = case_when(
+        str_detect(slicc_mucokutan, "1") ~ TRUE,
+        T~ FALSE),
+    slicc_cat_NoMuco = case_when(
+        str_detect(slicc_mucokutan, "0") ~ TRUE,
+        T~ FALSE),
+    #arthritis domain
+    slicc_cat_synovitis =
+      case_when(
+        str_detect(slicc_artrit, "1") ~ T,
+        T~ FALSE),
+    slicc_cat_arthralgia =
+      case_when(
+        str_detect(slicc_artrit, "2") ~ T,
+        T~ FALSE),
+    slicc_cat_nojoint =
+      case_when(
+        str_detect(slicc_artrit, "0") ~ T,
+        T~ FALSE),
+    #neurology domain
+    slicc_cat_seizure =
+          case_when(
+        str_detect(slicc_neurology, "3") ~ T,
+        T~ F),
+     slicc_cat_psychosis =
+          case_when(
+        str_detect(slicc_neurology, "2") ~ T,
+        T~ F),
+     slicc_cat_delirium =
+          case_when(
+        str_detect(slicc_neurology, "1") ~ T,
+        T~ F),
+     slicc_cat_none =
+          case_when(
+        str_detect(slicc_neurology, "0") ~ T,
+        T~ F),
+    #serositis domain
+      slicc_cat_acutepericarditis =
+          case_when(
+        str_detect(slicc_serositis, "2") ~ T,
+      T~ F),
+      slicc_cat_pleuralorpericardialeffusion =
+          case_when(
+        str_detect(slicc_serositis, "1") ~ T,
+      T~ F),
+      slicc_cat_noserositis =
+          case_when(
+        str_detect(slicc_serositis, "0") ~ T,
+      T~ F),
+    #Hematology Domain
+    slicc_cat_hemolyticAnemia =
+      case_when(
+        str_detect(slicc_hematology, "3") ~ T,
+      T~ F),
+    slicc_cat_thrombocytopenia =
+      case_when(
+        str_detect(slicc_hematology, "2") ~ T,
+      T~ F),
+    slicc_cat_leucopenia =
+      case_when(
+        str_detect(slicc_hematology, "1") ~ T,
+      T~ F),
+    slicc_cat_nohematology =
+      case_when(
+        str_detect(slicc_hematology, "0") ~ T,
+      T~ F),
+    #Nephrologic domain
+    slicc_cat_class3or4nephritis =
+      case_when(
+        str_detect(slicc_nefrologisk, "10") ~ T,
+      T~ F),
+    slicc_cat_class2or5nephritis =
+      case_when(
+        str_detect(slicc_nefrologisk, "8") ~ T,
+      T~ F),
+    slicc_cat_proteinuria =
+      case_when(
+        str_detect(slicc_nefrologisk, "4") ~ T,
+      T~ F),
+    slicc_cat_nonephrologic =
+      case_when(
+        str_detect(slicc_nefrologisk, "0") ~ T,
+      T~ F),
+    ###Immunologic Domain:
+    #APL
+    slicc_cat_antibeta2glykoprotein =
+      case_when(
+        str_detect(slicc_antiphospholipids, "4") ~ T,
+      T~ F),
+    slicc_cat_lupusanticoagulant =
+      case_when(
+        str_detect(slicc_antiphospholipids, "3") ~ T,
+      T~ F),
+    slicc_cat_anticardiolipins =
+      case_when(
+        str_detect(slicc_antiphospholipids, "1") ~ T,
+      T~ F),
+    slicc_cat_noantiphospholipids =
+      case_when(
+        str_detect(slicc_antiphospholipids, "0") ~ T,
+      T~ F),
+    #Complement
+    slicc_cat_lowC3andC4=
+      case_when(
+        str_detect(slicc_complement, "4") ~ T,
+      T~ F),
+    slicc_cat_lowC3orC4=
+      case_when(
+        str_detect(slicc_complement, "3") ~ T,
+      T~ F),
+    slicc_cat_normalC3andC4=
+      case_when(
+        str_detect(slicc_complement, "0") ~ T,
+      T~ F),
+    slicc_antidsdna=
+      case_when(anti_DsDNA==1 ~ T,
+      T~ F),
+    slicc_antismith=
+      case_when(anti_Smith==1 ~ T,
+      T~ F),
     )
 
 #Save SLICC data
@@ -963,8 +1126,12 @@ write_xlsx(x=SLEDAI.data,
 
 # Blood Samples
 
+Blood samples will require full access because of lack of anonymity with blood sample timepoints
+
 ```{r}
+
 library(lubridate)
+if(fullaccess){
 
 #Date for baseline blood samples can be accessed from the OGTT data which has the date of when the blood samples were taken.
 temp <- `_f_visit__oral_glucose_tolerance_test_ogtt_baseline.mITT.data` %>% dplyr::select(id, dato_ogtt,task_name)
@@ -1045,7 +1212,6 @@ Bloodsamples.combined.data <-
 Bloodsamples.combined.data.NA.timepoint <- Bloodsamples.combined.data%>%filter(
   is.na(timepoint)
 )#%>%distinct(date, .keep_all = T)
-View(Bloodsamples.combined.data.NA.timepoint)
 
 #Seems reasonable, this data is not related to the study, but came into the blood-samples dataset from patient visits that were close to my dates. It's great to know that I can find PET-CT dates from this dataset. Also ID = Lup006 who I had to exclude because her blood samples showed her to have a SLEDAI > 10 post randomization.
 
@@ -1070,18 +1236,10 @@ Bloodsamples.combined.data2<-
 #write it to a file to be accessed again by the script assessing models for Blood Samples
 write_xlsx(x=Bloodsamples.combined.data2, 
            path = here("Data",paste0("Bloodsamples.data", ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),".xlsx")))
-  
-
-
-Bloodsample.wide <- Bloodsamples.combined.data2%>%pivot_wider(
-  id_cols=c(id, timepoint, date, tidspunkt, time, time_from_t0, order_within_day),
-  names_from = var,
-  values_from = value
-)
 
 #TODO put the average of multiple values in each cell in.
 #We probably need a nested for loop iterating over all the cells in the frame to do this
-
+} 
 #
 ```
 
@@ -1090,6 +1248,7 @@ Bloodsample.wide <- Bloodsamples.combined.data2%>%pivot_wider(
 Below is an incredibly slow way of taking the averages of the numeric cells, which does work, on my system it takes 1.2 minutes. I'll save it to an excel file, and only re-run it when it is needed.
 
 ```{r eval = F}
+if(fullaccess){
 start_time <- Sys.time()
 Bloodsample.wide2 <- Bloodsample.wide %>% dplyr::select(1:7)
 
@@ -1113,19 +1272,57 @@ write_xlsx(x=Bloodsample.wide2,
                               ".xlsx")))
 end_time <- Sys.time()
 end_time - start_time
-rm(start_time, end_time)
+rm(start_time, end_time)}
 ```
 
+##Bloodsamples without nested lists and all that jazz
+
 ```{r}
+if(fullaccess){
 Bloodsamples<-read_excel(path = here("Data",
                        paste0("Bloodsamples.data.wide", 
                               ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),
-                              ".xlsx"))) #Okay so this doesn't work because it was nested vectors. Sigh. I have to take the average of each element.
+                              ".xlsx"))) 
+
+
+Bloodsamples<-Bloodsamples%>%mutate(
+  timepoint_during_day = case_when(
+    grepl("acute bout",timepoint) ~ "Acute Bout",
+    T ~
+      case_when(
+      time_from_t0 <  10 ~ "t0",
+      time_from_t0 <  25 ~ "t1",
+      time_from_t0 <  55 ~ "t2",
+      time_from_t0 <  85 ~ "t3",
+      time_from_t0 < 105 ~ "t4",
+      time_from_t0 < 150 ~ "t5",
+      T ~ NA_character_
+    )
+  )
+)
+
+Bloodsample.wide.no.OGTTorAcute <- Bloodsamples %>% 
+  filter(timepoint == "baseline"|timepoint=="followup")%>%filter(order_within_day==1)%>% 
+       unnest(cols = order_within_day:timepoint_during_day)  %>%
+       type.convert(as.is = TRUE) %>%
+       arrange(desc(id)) 
+#TODO find out why there are so many missing values
+
+  
+Bloodsample.wide <- Bloodsamples#%>%pivot_wider(
+  #id_cols=c(id, timepoint, date, tidspunkt, time, time_from_t0, order_within_day),
+  #names_from = var,
+  #values_from = value
+#)
+
+
+#Okay so this doesn't work because it was nested vectors. Sigh. I have to take the average of each element.
 #Bloodsample.wide%>%ggplot(aes(y=as.numeric(`Glukose;P`), x = as.numeric(time_from_t0)))+geom_point()
   #mutate(is_OGTT = case_when(n() > 1  & var %in% c("Glukose;P",
    #                                                  "Insulin;P",
     #                                                 "Proinsulin C-peptid;P") ~ TRUE,
      #                          TRUE ~ FALSE)) 
+}
 ```
 
 # AX3 Activity Measures
@@ -1186,7 +1383,7 @@ AX3_Data.Frame<-bind_rows(AX3_Pre_Thigh_PersonSummary,
                                        calendar_date, startday,
                                        dur_spt_min_pla,
                                        dur_day_total_IN_min_pla, dur_day_total_LIG_min_pla, duration_daily_MVPA_pla, dur_day_total_MOD_min_pla, dur_day_total_VIG_min_pla)
-View(AX3_Data.Frame)
+
 ```
 
 # Consort flowchart Generated using consort package
@@ -1272,10 +1469,12 @@ table1.questionnaires <- questionnaires.combined.data %>% dplyr::select(
   #m_1_2, ifn_1_el_sherb, m_3_4, ifn_2_el_sherb, m_5_12, 
   fatigue.mean, visuel_analog_træthedsskala_vats_målt_i_mm,
   physical.component.score, mental.component.score, 
-  sla_qvas, qslaq_score, qslaq_symptom_score)%>%dplyr::mutate(
+  sla_qvas, qslaq_score, qslaq_symptom_score)%>%
+  dplyr::mutate(
     vas_fatigue = `visuel_analog_træthedsskala_vats_målt_i_mm`,
     sf36_physical.component.score = physical.component.score,
     sf36_mental.component.score = mental.component.score,
+    FSS = fatigue.mean,
     .keep = "unused"
   )%>%mutate(
   timepoint = factor(to_snake_case(as.character(timepoint)))
@@ -1384,15 +1583,28 @@ table1.IFN.Quant.At.Baseline <- table1.cytokine_scores %>%
 
 
 
-table1.cytokine_scores_combined <- table1.cytokine_scores %>% left_join(table1.IFN.Quant.At.Baseline)
 
 table1.vo2max <- vo2max.data%>% dplyr::select(
   id, mITT, timepoint, treatment, sex,
   kondital, vo_2_max,
   borg_skala_efter_test, hrmax, watt_max
 )%>%mutate(
-  timepoint = factor(to_snake_case(as.character(timepoint)))
+  timepoint = factor(to_snake_case(as.character(timepoint))),
+  aerobic_capacity = kondital,
+  borg_skala_efter_test = borg_skala_efter_test+6,
+  .keep = "unused"
 )
+
+table1.vo2max.combined <- table1.vo2max %>% left_join(table1.IFN.Quant.At.Baseline, by = join_by("id"))
+
+#table1.vo2max.combined.screening_baseline_wide <- table1.vo2max.combined %>% 
+#  filter(timepoint!="followup") %>% pivot_wider(id_cols = c(id, mITT, treatment, sex), names_from = #c(timepoint), values_from = c(vo_2_max,borg_skala_efter_test,hrmax,watt_max,aerobic_capacity))%>%mutate(
+#    timepoint = "baseline"
+#  )%>%relocate(id, timepoint)
+
+#table1.vo2max.combined.screening_baseline_wide.followup <- 
+#  table1.vo2max.combined.screening_baseline_wide %>% 
+#  plyr::rbind.fill(table1.vo2max.combined%>%filter(timepoint == "followup"))
 
 table1.SLEDAI.data <- SLEDAI.data %>% dplyr::select(
   id, timepoint,
@@ -1402,7 +1614,7 @@ table1.SLEDAI.data <- SLEDAI.data %>% dplyr::select(
 )
 
 table1.SLICC.data <- SLICC.data %>% dplyr::select(
-  id, slicc_score) %>% mutate(timepoint = "baseline")
+  id, slicc_score:slicc_antismith ) %>% mutate(timepoint = "baseline")
 
 table1.kidney <- Bloodsamples %>%
   filter(timepoint == "baseline" | timepoint == "followup")%>%
@@ -1434,6 +1646,15 @@ table1.dexa<- `_c_visit__anthropometrics_and_dxa.mITT.data` %>%
     T~NA_character_
   ), .keep = "unused") %>% relocate(
     id, timepoint, sex, dato_dxa
+  )%>%mutate(
+    total_fat_kg = total_fat/1000,
+    total_fat_percentage = total_fat_001,
+    android_fat_mass_kg = android_fat_mass_g/1000,
+    android_fat_mass_percentage = android_fat_mass_g_001,
+    gynoid_fat_mass_kg = gynoid_fatt_mass_g/1000,
+    gynoid_fatt_mass_percentage = gynoid_fatt_mass_g_001,
+    total_muscle_mass_kg=total_muscle_mass_g/1000, 
+    .keep = "unused"
   )
 
 table1.activity.measures <- 
@@ -1447,7 +1668,7 @@ table1.activity.measures <-
                 duration_daily_MVPA_pla, dur_day_total_MOD_min_pla,
                 dur_day_total_VIG_min_pla)
 
-table1.other.anthropometric <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.",
+table1.other.anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.",
                                          ifelse(mITT,"mITT",
                                           ifelse(PP, "PP","")),".data .xlsx")))%>%
   mutate(timepoint=case_when(
@@ -1456,32 +1677,388 @@ table1.other.anthropometric <- read_excel(path=here("Data/easy_trial_seperate_sc
      grepl("Baseline",task_name) ~ "baseline"))%>%
   dplyr::select(id, treatment,sex,timepoint, mITT, PP, 
                 højde, weight, taljeomkreds, 
+                hvilepuls,
                 etnisk_oprindelse, etnicitet_anden, 
                 systolisk_bt, diastolisk_bt,
-                sle_start_dato,tidligere_medicin_sle,
-                tidligere_medicin_sle_001,
+                sle_start_dato,
+                medicin_ændringer_siden_baseline,
+                tidligere_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
+                aktuel_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
+                relevant_hvilket,
                 hvilket_medicin_anden_relevant,
                 hvilket_medicin_anden_relevant_001,
                 hvilket_medicin_002,
-                rituximab, #TODO add dose, update output from easytrial
-                cyklofosfamid, #TODO add dose etc. update easytrial to reflect.
+                rituximab, dosis_rtx, seneste_rtx, 
+                cyklofosfamid, dosis_cyclo,senest_cyclo, 
                 andet_medicin, hvilket_andet, dosis_andet,
                 andet_med_2, hvilket_andet_med_2, andet_med_dosis,
                 andet_med_3, hvilket_andet_med_3, dosis_andet_med_3,
                 andet_med_4, hvilket_andet_med_4, dosis_andet_med_4
                 )%>%mutate(
-    AktuelSLEMedicin = tidligere_medicin_sle_001,
-    .keep="unused"
-  )
+                  height = højde,
+  waist_circumference = taljeomkreds,
+  resting_pulse=hvilepuls,
+  ethnicity = case_when(
+    etnisk_oprindelse == 0 ~ "Caucasian",
+    etnisk_oprindelse == 1 ~ "Asian",
+    etnisk_oprindelse == 2 ~ case_when(
+      etnicitet_anden == "mellemøsten" ~ "Middle-Eastern",
+      etnicitet_anden == "Afrikaner" ~ "African",
+      etnicitet_anden == "Argentina" ~ "Latin America",
+      etnicitet_anden == "Iran" ~ "Middle-Eastern",
+      T ~ NA_character_
+    ),
+      id              == "lup_014" ~ "Caucasian",
+    T~NA_character_
+  ),
+  .keep="all")%>%dplyr::select(-c(
+    højde, taljeomkreds
+  ))
 
+table1.other.anthropometric.medicalhistory2<-
+  table1.other.anthropometric.medicalhistory%>%
+  group_by(id)%>%
+  mutate( #dummy code out pharmaceutical treatments
+    prednisolone_dose = #TODO opdater data så vi også finder den der var indskrevet som "predmisolon"
+      case_when(
+      grepl("isolon", hvilket_andet) ~ dosis_andet,
+      grepl("isolon", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("isolon", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("isolon", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      T ~ "0mg"
+    ),
+    
+    methotrexate_dose = 
+      case_when(
+      grepl("rexa", hvilket_andet) ~ dosis_andet,
+      grepl("rexa", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("rexa", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("rexa", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("1", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    plaquenil_dose = 
+      case_when(
+      grepl("aque", hvilket_andet) ~ dosis_andet,
+      grepl("aque", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("aque", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("aque", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("2", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    sulfaszalasine_dose = 
+      case_when(
+      grepl("alasine", hvilket_andet) ~ dosis_andet,
+      grepl("alasine", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("alasine", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("alasine", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("3", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    ciclosporine_dose = 
+      case_when(
+      grepl("lospor", hvilket_andet) ~ dosis_andet,
+      grepl("lospor", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("lospor", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("lospor", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("4", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    leflunomide_dose = 
+      case_when(
+      grepl("lunomi", hvilket_andet) ~ dosis_andet,
+      grepl("lunomi", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("lunomi", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("lunomi", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("5", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    rituximab_dose = 
+      case_when(
+      grepl("tuximab", hvilket_andet) ~ dosis_andet,
+      grepl("tuximab", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("tuximab", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("tuximab", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("6", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    cyclophosphamide_dose = 
+      case_when(
+      grepl("cyclophos", hvilket_andet) ~ dosis_andet,
+      grepl("cyclophos", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("cyclophos", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("cyclophos", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("7", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    mycophenolate_dose = 
+      case_when(
+      grepl("yfena", hvilket_andet) ~ dosis_andet,
+      grepl("yfena", hvilket_andet_med_2) ~ andet_med_dosis,
+      grepl("yfena", hvilket_andet_med_3) ~ dosis_andet_med_3,
+      grepl("yfena", hvilket_andet_med_4) ~ dosis_andet_med_4,
+      grepl("8", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    azathioprine_dose = 
+      case_when(
+      any(c(grepl("thioprin", hvilket_andet),       grepl("murel", hvilket_andet))) ~ dosis_andet,
+      any(c(grepl("thioprin", hvilket_andet_med_2), grepl("murel", hvilket_andet_med_2))) ~ andet_med_dosis,
+      any(c(grepl("thioprin", hvilket_andet_med_3), grepl("murel", hvilket_andet_med_3))) ~ dosis_andet_med_3,
+      any(c(grepl("thioprin", hvilket_andet_med_4), grepl("murel", hvilket_andet_med_4))) ~ dosis_andet_med_4,
+      grepl("9", aktuel_medicin_sle) ~ NA_character_,
+      T ~ "0mg"
+    ),
+    
+    tnf_blocker_dose = 
+      case_when(
+      any(c(grepl("relzi", hvilket_andet),       grepl("anercep", hvilket_andet))) ~ dosis_andet,
+      any(c(grepl("relzi", hvilket_andet_med_2), grepl("anercep", hvilket_andet_med_2))) ~ andet_med_dosis,
+      any(c(grepl("relzi", hvilket_andet_med_3), grepl("anercep", hvilket_andet_med_3))) ~ dosis_andet_med_3,
+      any(c(grepl("relzi", hvilket_andet_med_4), grepl("anercep", hvilket_andet_med_4))) ~ dosis_andet_med_4,
+      T ~ "0mg"
+    ),
+    
+    belimumab_dose = 
+      case_when(
+      any(c(grepl("elimum", hvilket_andet),       grepl("enlyst", hvilket_andet))) ~ dosis_andet,
+      any(c(grepl("elimum", hvilket_andet_med_2), grepl("enlyst", hvilket_andet_med_2))) ~ andet_med_dosis,
+      any(c(grepl("elimum", hvilket_andet_med_3), grepl("enlyst", hvilket_andet_med_3))) ~ dosis_andet_med_3,
+      any(c(grepl("elimum", hvilket_andet_med_4), grepl("enlyst", hvilket_andet_med_4))) ~ dosis_andet_med_4,
+      T ~ "0mg"
+    ),
+    
+    
+    )%>%
+  mutate(
+    prednisolone_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        prednisolone_dose[timepoint=="baseline"],
+      T~prednisolone_dose),
+    prednisolone = case_when(
+      prednisolone_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    methotrexate_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        methotrexate_dose[timepoint=="baseline"],
+      T~methotrexate_dose),
+    methotrexate = case_when(
+      methotrexate_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    plaquenil_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        plaquenil_dose[timepoint=="baseline"],
+      T~plaquenil_dose),
+    plaquenil = case_when(
+      plaquenil_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    sulfaszalasine_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        sulfaszalasine_dose[timepoint=="baseline"],
+      T~sulfaszalasine_dose),
+    sulfaszalasine = case_when(
+      sulfaszalasine_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    ciclosporine_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        ciclosporine_dose[timepoint=="baseline"],
+      T~ciclosporine_dose),
+    ciclosporine = case_when(
+      ciclosporine_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    leflunomide_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        leflunomide_dose[timepoint=="baseline"],
+      T~leflunomide_dose),
+    leflunomide = case_when(
+      leflunomide_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    rituximab_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        rituximab_dose[timepoint=="baseline"],
+      T~rituximab_dose),
+    rituximab = case_when(
+      rituximab_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    cyclophosphamide_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        cyclophosphamide_dose[timepoint=="baseline"],
+      T~cyclophosphamide_dose),
+    cyclophosphamide = case_when(
+      cyclophosphamide_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    mycophenolate_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        mycophenolate_dose[timepoint=="baseline"],
+      T~mycophenolate_dose),
+    mycophenolate = case_when(
+      mycophenolate_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    azathioprine_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        azathioprine_dose[timepoint=="baseline"],
+      T~azathioprine_dose),
+    azathioprine = case_when(
+      azathioprine_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    tnf_blocker_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        tnf_blocker_dose[timepoint=="baseline"],
+      T~tnf_blocker_dose),
+    tnf_blocker = case_when(
+      tnf_blocker_dose == "0mg" ~ F, 
+      T ~ T),
+    
+    belimumab_dose=
+    case_when(
+      medicin_ændringer_siden_baseline == 0 ~
+        belimumab_dose[timepoint=="baseline"],
+      T~belimumab_dose),
+    belimumab = case_when(
+      belimumab_dose == "0mg" ~ F, 
+      T ~ T),
+    )
+
+#write_xlsx(table1.other.anthropometric.medicalhistory2, path = here("Data","table1.other.anthropometric.pharma_done.xlsx"))
+
+#table1.other.anthropometric.medicalhistory2%>%select(
+#  id, timepoint, medicin_ændringer_siden_baseline, tnf_blocker_dose,
+#  hvilket_andet, hvilket_andet_med_2, hvilket_andet_med_3, hvilket_andet_med_4, 
+#  )%>%View()
+
+
+#View(table1.other.anthropometric.medicalhistory2)
+
+screening.waist.weight <- `_c_visit__samtykke_inklusion_eksklusionskriterier_baseline_fysisk_aktivitet.mITT.data`%>%dplyr::select(
+  id,
+  taljemål_måles,
+  hvilepuls,
+  vægt)%>%mutate(
+  timepoint = "screening",
+  waist_circumference = taljemål_måles,
+  resting_pulse=hvilepuls,
+  weight = vægt,
+  .keep="unused")
+
+table1.other.anthropometric.medicalhistory <- 
+  table1.other.anthropometric.medicalhistory2 %>% 
+  plyr::rbind.fill(screening.waist.weight)%>%
+  group_by(id)%>%
+  fill(ethnicity)%>%
+  mutate(
+  waist_height_ratio = (waist_circumference/height),
+  bmi = weight/((height/100)^2)
+  )%>%dplyr::select(-c(
+    sex, mITT, PP, treatment
+  ))
+
+table1.dietary.intake <- read_excel(path = here("Data","DietaryReports.xlsx"))%>%mutate(
+  timepoint = to_snake_case(timepoint)
+)
+
+if(fullaccess){
+Bloodsample.wide.no.OGTTorAcute.snake.cols<-Bloodsample.wide.no.OGTTorAcute
+colnames(Bloodsample.wide.no.OGTTorAcute.snake.cols)<-
+  to_snake_case(colnames(Bloodsample.wide.no.OGTTorAcute.snake.cols))
+
+table1.blood.samples <- Bloodsample.wide.no.OGTTorAcute.snake.cols %>% dplyr::select(
+  id, timepoint, 
+  hæmoglobin_b, leukocytter_b, trombocytter_b,
+  lymfocytter_b,interleukin_6_p,
+  beta_2_mikroglobulin_p, complement_c_3_p, complement_c_4_p,
+  dna_dobbeltstrenget_ig_g_p)%>%mutate(
+     hemoglobin   =hæmoglobin_b, 
+     leucocytes   =leukocytter_b, 
+     thrombocytes =trombocytter_b,
+     lymphocytes  =lymfocytter_b,
+     interleukin_6=interleukin_6_p,
+     beta2_microglobuline=beta_2_mikroglobulin_p, 
+     complement_c3 = complement_c_3_p, 
+     complement_c4 = complement_c_4_p,
+     anti_dsDNA=dna_dobbeltstrenget_ig_g_p,
+    .keep="unused"  )
+} else { #This code is just so the tables below will compile, it will retain little, if any information from the original study.
+    table1.blood.samples <- table1.questionnaires %>% dplyr::select(
+      id, timepoint
+    )%>%mutate(
+     hemoglobin   =NA_real_, 
+     leucocytes   =NA_real_, 
+     thrombocytes =NA_real_,
+     lymphocytes  =NA_real_,
+     interleukin_6=NA_real_,
+     beta2_microglobuline=NA_real_, 
+     complement_c3 = NA_real_, 
+     complement_c4 = NA_real_,
+     anti_dsDNA    =NA_real_
+      )
+    
+     table1.blood.samples$hemoglobin   <-rnorm(length(table1.blood.samples$hemoglobin), 7.5,1.5)
+     table1.blood.samples$leucocytes   <-rnorm(length(table1.blood.samples$hemoglobin), 7.5,1.5)
+     table1.blood.samples$thrombocytes =rnorm(length(table1.blood.samples$hemoglobin), 300,50)
+     table1.blood.samples$lymphocytes  =rnorm(length(table1.blood.samples$hemoglobin), 2,0.5)
+     table1.blood.samples$interleukin_6=rnorm(length(table1.blood.samples$hemoglobin), 3,1)
+     table1.blood.samples$beta2_microglobuline=rnorm(length(table1.blood.samples$hemoglobin), 4,1.5)
+     table1.blood.samples$complement_c3 = rnorm(length(table1.blood.samples$hemoglobin), 0.9,0.2)
+     table1.blood.samples$complement_c4 = rnorm(length(table1.blood.samples$hemoglobin), 0.85,0.22)
+     table1.blood.samples$anti_dsDNA    =rbeta(length(table1.blood.samples$hemoglobin), 2,8)*100
+    
+  }
+
+if(fullaccess){suppressWarnings(
+table1.age <- read_excel(
+  path="L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/Samlet Data v.5.xlsx")%>%
+  filter(
+    task_name=="Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion") %>%
+  dplyr::select(
+    allocation_no, birthday,`[dato_vo2max]`)%>%
+  mutate(
+    id = to_snake_case(allocation_no),
+    age = year(lubridate::as.period(lubridate::interval(birthday,`[dato_vo2max]`))),
+    .keep = "unused")%>%filter(!is.na(age))
+    #FYI this line will not run on external devices, and should be blanked out.
+
+)} else if(fullaccess==F){
+  age <- NA_real_
+  table1.age <- data.frame(id=table1.vo2max.combined$id, age)
+}
+table1.vo2max.combined<-table1.vo2max.combined %>%left_join(table1.age)%>%relocate(id, mITT, timepoint, treatment, age)
+  
 ```
 
 ## Creating table 1 from data sets
 
 ```{r}
-
-data.table1 <- table1.vo2max %>% left_join(
-  table1.cytokine_scores_combined, by=c("id","timepoint"), keep =F
+data.table1 <- table1.vo2max.combined %>% left_join(
+  table1.cytokine_scores, by=c("id","timepoint"), keep =F
             )%>% left_join(
   table1.kidney, by=c("id","timepoint")
             )%>% left_join(
@@ -1493,19 +2070,962 @@ data.table1 <- table1.vo2max %>% left_join(
             )%>% left_join(
   table1.dexa, by=c("id","timepoint","sex"), keep =F
             )%>%left_join(
+  table1.dietary.intake, by=c("id","timepoint"), keep =F
+            )%>%left_join(
   table1.activity.measures, by=c("id","timepoint"), keep =F
-            )%>%
+            )%>%left_join( 
+  table1.blood.samples, by=c("id","timepoint"), keep =F
+           )%>%left_join( 
+  table1.other.anthropometric.medicalhistory, by=c("id","timepoint"), keep =F
+           )%>%
+  mutate(timepoint = factor(timepoint,levels = c("screening", "baseline", "followup")))%>%
   relocate(
-  id, timepoint, treatment, sex, kondital, fatigue.mean) %>%
-  group_by(id)#TODO create this dataset
+  id, timepoint, treatment, sex, aerobic_capacity, FSS) %>%
+  group_by(id)%>%mutate(
+    sex = factor(sex, levels =c("F","M"), labels = c("Female","Male")))
+    #TODO create this dataset
+```
 
+##Set labels & units for table 1
+
+```{r}
+label(data.table1$sex) <- "Sex"
+
+label(data.table1$bmi) <- "Body Mass Index"
+units(data.table1$bmi) <- "kg/m\u00B2"
+
+label(data.table1$FSS) <- "FSS"
+
+label(data.table1$age) <- "Age"
+units(data.table1$age) <- "Years"
+
+label(data.table1$weight) <- "Weight"
+units(data.table1$height) <- "kg"
+
+label(data.table1$height) <- "Height"
+units(data.table1$height) <- "cm"
+
+label(data.table1$waist_height_ratio) <- "Waist/Height Ratio"
+
+label(data.table1$vo_2_max) <- paste0("VO", "\u2082", "max")
+units(data.table1$vo_2_max) <- "ml/min"
+
+label(data.table1$aerobic_capacity) <- "Aerobic Capacity"
+units(data.table1$aerobic_capacity) <- "ml/kg/min"
+
+label(data.table1$SLEDAI_score) <- "SLEDAI"
+
+label(data.table1$slicc_score)<- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_fever) <- "Fever"
+units(data.table1$slicc_cat_fever) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_AcuteCutLupus) <- "Acute Cutaneous Lupus"
+units(data.table1$slicc_cat_AcuteCutLupus) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_SubAcuteCutorDiscLupus) <- "Subacute Cutaneous or Discoid Lupus"
+units(data.table1$slicc_cat_SubAcuteCutorDiscLupus) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_OralUlcers) <- "Oral Ulcers"
+units(data.table1$slicc_cat_OralUlcers) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_Alopecia) <- "Non-Scarring Alopecia"
+units(data.table1$slicc_cat_Alopecia) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_NoMuco) <- "No Mucocutaneous Symptoms"
+units(data.table1$slicc_cat_NoMuco) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_antidsdna) <- "Anti-DsDNA"
+units(data.table1$slicc_antidsdna) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_antismith) <- "Anti-Smith"
+units(data.table1$slicc_antismith) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_synovitis) <- "Synovitis"
+units(data.table1$slicc_cat_synovitis) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_arthralgia) <- "Athralgias"
+units(data.table1$slicc_cat_arthralgia) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_nojoint) <- "No joint pain or swelling"
+units(data.table1$slicc_cat_nojoint) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_seizure) <- "Seizures"
+units(data.table1$slicc_cat_seizure) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_psychosis) <- "Psychosis"
+units(data.table1$slicc_cat_psychosis) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_delirium) <- "Delirium"
+units(data.table1$slicc_cat_delirium) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_none) <- "No neurologic symptoms"
+units(data.table1$slicc_cat_none) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_acutepericarditis) <- "Acute Pericarditis"
+units(data.table1$slicc_cat_acutepericarditis) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_pleuralorpericardialeffusion) <- "Pleural or Pericardial Effusion"
+units(data.table1$slicc_cat_pleuralorpericardialeffusion) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_noserositis) <- "No serositis"
+units(data.table1$slicc_cat_noserositis) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_hemolyticAnemia) <- "Autoimmune Hemolytic Anemia"
+units(data.table1$slicc_cat_hemolyticAnemia) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_thrombocytopenia) <- "Thrombocytopenia"
+units(data.table1$slicc_cat_thrombocytopenia) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_leucopenia) <- "Leucopenia"
+units(data.table1$slicc_cat_leucopenia) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_nohematology) <- "No Hematologic Symptoms"
+units(data.table1$slicc_cat_nohematology) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_class3or4nephritis) <- "Class III or IV Nephritis"
+units(data.table1$slicc_cat_class3or4nephritis) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_class2or5nephritis) <- "Class II or V Nephritis"
+units(data.table1$slicc_cat_class2or5nephritis) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_proteinuria) <- "Proteinuria"
+units(data.table1$slicc_cat_proteinuria) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_nonephrologic) <- "No nephrologic symptoms"
+units(data.table1$slicc_cat_nonephrologic) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_antibeta2glykoprotein) <- "Anti-Beta2-Glycoprotein"
+units(data.table1$slicc_cat_antibeta2glykoprotein) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_lupusanticoagulant) <- "Lupus Anti Coagulant"
+units(data.table1$slicc_cat_lupusanticoagulant) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_anticardiolipins) <- "Anti Cardiolipins"
+units(data.table1$slicc_cat_anticardiolipins) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_noantiphospholipids) <- "No Anti Phospholipids"
+units(data.table1$slicc_cat_noantiphospholipids) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_lowC3andC4) <- "Low Complement C3 and C4"
+units(data.table1$slicc_cat_lowC3andC4) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_lowC3orC4) <- "Low Complement C3 or C4"
+units(data.table1$slicc_cat_lowC3orC4) <- "SLICC-Eular/ACR-2019"
+
+label(data.table1$slicc_cat_normalC3andC4) <- "Normal Complement C3 or C4"
+units(data.table1$slicc_cat_normalC3andC4) <- "SLICC-Eular/ACR-2019"
+
+
+label(data.table1$hemoglobin) <- "Hemoglobin"
+units(data.table1$hemoglobin) <- "mmol/L"
+
+label(data.table1$leucocytes) <- "Leucocytes"
+units(data.table1$leucocytes) <- "10^9/L"
+
+label(data.table1$thrombocytes) <- "Thrombocytes"
+units(data.table1$thrombocytes) <- "10^9/L"
+
+label(data.table1$lymphocytes) <- "Lymphocytes"
+units(data.table1$lymphocytes) <- "10^9/L"
+
+label(data.table1$interleukin_6) <- "Interleukin_6"
+units(data.table1$interleukin_6) <- "ng/L"
+
+label(data.table1$beta2_microglobuline) <- "\u03B22 microglobuline"
+units(data.table1$beta2_microglobuline) <- "mg/L"
+
+label(data.table1$complement_c3) <- "Complement C3"
+units(data.table1$complement_c3) <- "g/L"
+
+label(data.table1$complement_c4) <- "Complement C3"
+units(data.table1$complement_c4) <- "g/L"
+
+label(data.table1$anti_dsDNA) <- "anti_dsDNA"
+units(data.table1$anti_dsDNA) <- "kIU/L"
+
+label(data.table1$duration_daily_MVPA_pla) <- "Time in MVPA per day"
+units(data.table1$duration_daily_MVPA_pla) <- "Minutes"
+```
+
+## Pivot dataset wider to ready for table 1
+
+```{r}
+library(lubridate)
+data.table1.wide <- data.table1 %>% pivot_wider(
+  id_cols=c(id, treatment, sex, mITT, age,  #etnisk_oprindelse,etnicitet_anden,
+            m_1_2_quantile_at_baseline, 
+            m_3_4_quantile_at_baseline,         
+            m_5_12_quantile_at_baseline, 
+            ifn1_el_sherb_quantile_at_baseline,
+            ifn2_el_sherb_quantile_at_baseline,
+            ifn2_siddiqi_quantile_at_baseline,
+            il_6_related_quantile_at_baseline,
+            tnf_related_quantile_at_baseline,
+            m_1_2_elevated,
+            m_3_4_elevated,
+            m_5_12_elevated,
+            ifn_1_el_sherb_elevated,
+            ifn_2_el_sherb_elevated,
+            ifn_2_siddiqi_elevated,
+            tnf_elevated,
+            il6_elevated), 
+  names_from = timepoint,
+  values_from = c(aerobic_capacity, FSS, vo_2_max, 
+                  borg_skala_efter_test, hrmax, watt_max, 
+                  m_1_2:bmi))%>%
+  relocate(
+    id, treatment, sex, 
+    aerobic_capacity_screening, aerobic_capacity_baseline, aerobic_capacity_followup, 
+    FSS_baseline, FSS_followup
+  )
+
+data.table1.wide<-data.table1.wide%>% 
+       #unnest(cols = id:bmi_followup)  %>%
+       #type.convert(as.is = TRUE)%>%
+  mutate(
+    waist_circumference_baseline_2 = 
+      case_when(is.na(waist_circumference_baseline) ~ waist_circumference_screening,
+                T~ waist_circumference_baseline),
+    waist_height_ratio_baseline_2 = waist_circumference_baseline_2/height_baseline,
+    SLE_Duration = lubridate::as.period(lubridate::interval(sle_start_dato_baseline,dato_dxa_baseline)),
+    SLE_Duration_Years  = year(SLE_Duration)+month(SLE_Duration)/12,
+    SLE_Duration_Months = 12*SLE_Duration_Years,
+    .keep = "all")
+
+#View(data.table1.wide)
+
+#table1.LMMstar.Sum<-data.table1 %>% filter (timepoint != "followup")%>%LMMstar::summarize(formula = 
+#            aerobic_capacity + FSS + sex ~ timepoint + treatment,
+#            data=.,
+#            digits = 1,
+#            na.rm = T)%>%mutate(
+#              count = round(mean*observed,0),
+#              percent_missing = pc.missing *100)%>%mutate(
+#                across(where(is.numeric), ~ round(.x, digits = 2)))
+
+## I tested out the LMMstar summarize for making table 1, I think I could have used it, but I do think I should prefer table1 because It's easier to convert to a flextable.
 
 
 ```
 
+### Set labels & Units for wider dataset
+
+```{r}
+
+label(data.table1.wide$aerobic_capacity_screening) <- "Aerobic Capacity Test 1"
+label(data.table1.wide$aerobic_capacity_baseline)  <- "Aerobic Capacity Test 2"
+
+label(data.table1.wide$vo_2_max_screening) <- paste0("VO", "\u2082", "max test 1")
+label(data.table1.wide$vo_2_max_baseline) <- paste0("VO", "\u2082", "max test 2")
+
+label(data.table1.wide$hrmax_screening) <- "HRmax at Test 1"
+label(data.table1.wide$hrmax_baseline)  <- "HRmax at Test 2"
+label(data.table1.wide$borg_skala_efter_test_screening) <- "Borg-Scale Test 1"
+label(data.table1.wide$borg_skala_efter_test_baseline)  <- "Borg-Scale Test 2"
+label(data.table1.wide$watt_max_screening) <- "Maximal Wattage Test 1"
+label(data.table1.wide$watt_max_baseline)  <- "Maximal Wattage Test 2"
+
+units(data.table1.wide$watt_max_screening) <- "Watt"
+units(data.table1.wide$watt_max_baseline)  <- "Watt"
+
+label(data.table1.wide$vas_fatigue_baseline) <- "VAS Fatigue - Patient"
+units(data.table1.wide$vas_fatigue_baseline) <- "1-100"
+
+label(data.table1.wide$sla_qvas_baseline) <- "VAS overall disease activity - patient"
+units(data.table1.wide$sla_qvas_baseline) <- "1-10"
+
+label(data.table1.wide$vas_sledai_physician_baseline) <- "VAS overall disease activity - physician"
+units(data.table1.wide$vas_sledai_physician_baseline) <- "1-100"
+
+label(data.table1.wide$fat_g_mean_baseline) <- "Lipid intake"
+units(data.table1.wide$fat_g_mean_baseline) <- "g"
+
+label(data.table1.wide$carbohydrate_g_mean_baseline) <- "Carbohydrate intake"
+units(data.table1.wide$carbohydrate_g_mean_baseline) <- "g"
+
+label(data.table1.wide$protein_g_mean_baseline) <- "Protein intake"
+units(data.table1.wide$protein_g_mean_baseline) <- "g"
+
+label(data.table1.wide$android_fat_mass_kg_baseline) <- "Android fat mass"
+units(data.table1.wide$android_fat_mass_kg_baseline) <- "kg"
+
+label(data.table1.wide$gynoid_fat_mass_kg_baseline) <- "Gynoid fat mass"
+units(data.table1.wide$gynoid_fat_mass_kg_baseline) <- "kg"
+
+label(data.table1.wide$total_muscle_mass_kg_baseline) <- "Total lean mass"
+units(data.table1.wide$total_muscle_mass_kg_baseline) <- "kg"
+
+label(data.table1.wide$eGFR_baseline) <- "Estimated Glomerular Filtration Rate"
+units(data.table1.wide$eGFR_baseline) <- "ml/min/1.73m\u00B2"
+
+label(data.table1.wide$beta2_microglobuline_baseline) <- "\u03B22 microglobuline"
+
+label(data.table1.wide$sf36_mental.component.score_baseline) <- "SF-36 Mental Component Score"
+label(data.table1.wide$sf36_physical.component.score_baseline) <- "SF-36 Physical Component Score"
+
+label(data.table1.wide$SLE_Duration_Years)  <- "SLE duration"
+units(data.table1.wide$SLE_Duration_Years)  <- "years"
+label(data.table1.wide$SLE_Duration_Months) <- "SLE duration"
+units(data.table1.wide$SLE_Duration_Months) <- "months"
+label(data.table1.wide$m_1_2_baseline)      <- "IFN\u03B1  Z-Score"
+units(data.table1.wide$m_1_2_baseline)      <- "m.1.2"
+
+label(data.table1.wide$m_3_4_baseline)      <- "IFN\u03B2  Z-Score"
+units(data.table1.wide$m_3_4_baseline)      <- "m.3.4"
+
+label(data.table1.wide$m_5_12_baseline)      <- "IFN\u03B3  Z-Score"
+units(data.table1.wide$m_5_12_baseline)      <- "m.5.12"
+
+label(data.table1.wide$waist_height_ratio_baseline_2) <- "Waist/Height Ratio at baseline"
+
+label(data.table1.wide$SLE_Duration_Months) <- "SLE Duration"
+units(data.table1.wide$SLE_Duration_Months) <- "Months"
+
+label(data.table1.wide$duration_daily_MVPA_pla_baseline)<-"Daily time in MVPA"
+units(data.table1.wide$duration_daily_MVPA_pla_baseline)<-"Minutes"
+
+label(data.table1.wide$Energy_kJ_mean_baseline) <- "Energy Intake"
+units(data.table1.wide$Energy_kJ_mean_baseline) <- "kJ"
+
+label(data.table1.wide$total_fat_kg_baseline) <- "Adipose Tissue on DXA scan"
+units(data.table1.wide$total_fat_kg_baseline) <- "kg"
+
+label(data.table1.wide$total_fat_percentage_baseline) <- "Adipose Tissue on DXA scan"
+units(data.table1.wide$total_fat_percentage_baseline) <- "%"
+
+label(data.table1.wide$ethnicity_baseline) <- "Ethnicity"
+
+```
+
+## Create Table 1 Using table 1 package
+
+```{r}
+
+
+#my.render.cont <- function(x) {
+#    with(stats.apply.rounding(stats.default(x), digits=2), 
+#       c("", "Median [25%Q,75%Q]"=sprintf("%s [%s,%s]", MEDIAN, q25,q75)))
+#   with(stats.apply.rounding(stats.default(x), digits=2), 
+#       c("", "Mean (SD)"=sprintf("%s (%s)", MEAN, SD)))
+#  } 
+#else{
+#  with(stats.apply.rounding(stats.default(x), digits=2), 
+#       c("", "Mean (SD)"=sprintf("%s (%s)", MEAN, SD)))
+#  }
+#}
+my.render.cat.old <- function(x) {
+  c("", sapply(stats.default(x), function(y) with(y, sprintf("%d (%0.0f %%)", FREQ, PCT))))
+}
+
+my.render.cat <- function(x) {
+  c(sapply(stats.default(x), function(y) with(y, sprintf("%d (%0.0f %%)", FREQ, PCT))))
+}
+
+
+rndr.old <- function(x, name, ...) {
+    if (!is.numeric(x)) return(render.categorical.default(x))
+  what <-
+    case_when(
+   name %in% list_normal_dist ~ c(.="N", .="Mean (SD)", .="NMISS"),
+   T ~ c(.="N",  .="Median [Q1, Q3]", .="NMISS"))
+    parse.abbrev.render.code(c("", what))(x)
+}
+
+rndr <- function(x, name, ...) {
+    if (!is.numeric(x)) return(render.categorical.default(x))
+  what <-
+    case_when(
+   name %in% list_normal_dist ~ c(.="N", .="Mean (SD)", .="NMISS"),
+   T ~ c(.="N",  .="Median [Q1, Q3]", .="NMISS"))
+    parse.abbrev.render.code(c(what))(x)
+}
+
+
+#renv::install("flextable")
+#library(flextable)
+set_flextable_defaults(na_str = " ", nan_str = " ")
+list_normal_dist <- c(
+  "aerobic_capacity_screening","aerobic_capacity_baseline", 
+  "vo_2_max_baseline", "vo_2_max_screening",
+  "duration_daily_MVPA_pla_baseline", "change_MVPA",
+  "hemoglobin_baseline", "thrombocytes_baseline", "Beta2_microglobuline_baseline",
+                      "aerobic_capacity_change_from_screening",
+                      "aerobic_capacity_change_from_baseline",
+  "Energy_kJ_mean_baseline", "Energy_intake_change")
+#non_cont_variables <- c("age")
+
+t1a<-data.table1.wide%>%table1(x= ~ 
+              sex +
+              age +
+              weight_baseline+
+              waist_height_ratio_baseline+
+              bmi_baseline+
+              SLE_Duration_Months+
+              SLEDAI_score_baseline+
+              slicc_score_baseline+
+              aerobic_capacity_screening +
+                vo_2_max_baseline +
+              aerobic_capacity_baseline +
+                vo_2_max_screening +
+              FSS_baseline +
+              duration_daily_MVPA_pla_baseline+
+              Energy_kJ_mean_baseline+
+              total_fat_percentage_baseline+
+              m_1_2_baseline+
+              m_3_4_baseline+
+              m_5_12_baseline+
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+                hemoglobin_baseline+
+                thrombocytes_baseline+
+              beta2_microglobuline_baseline|
+              treatment,
+              render=rndr,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1.a.flex<-t1flex(t1a)
+
+
+t1.a.flex%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table1",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+
+#rndr.abbreviated <- function(x, name, round=2, ...) {
+#  r <- round
+#    if (!is.numeric(x)) return(render.categorical.default(x)) else{
+#  out <-
+#    case_when(
+#   name %in% list_normal_dist ~ 
+#     paste0(round(stats.default(x)$MEAN,r)," (",round(stats.default(x)$SD,r),")"),
+#   T ~ 
+#     paste0(round(stats.default(x)$MEDIAN,r)," [",round(stats.default(x)$q25,r)," ; ",round(stats.default(x)$q75,r),"]"))
+#  return(out)}
+#}
+
+#rndr.abbreviated <- function(x, name, ...) {
+#    if (!is.numeric(x)) return(render.categorical.default(x))
+#  what <-
+#    case_when(
+#   name %in% list_normal_dist ~ c("Mean (SD)"),
+#   T ~ c("Median [Q1, Q3]"))
+#  parse.abbrev.render.code(what)(x)
+#}
+
+rndr.abbreviated <- function(x, name, ...) {
+    if (!is.numeric(x)) return(render.categorical.default(x))
+  what <-
+    case_when(
+   name %in% list_normal_dist ~ c("Mean (SD) \n missing: NMISS"),
+   T ~ c("Median [Q1, Q3] \n missing: NMISS"))
+  parse.abbrev.render.code(what)(x)
+}
+
+t1a.abbr<-data.table1.wide%>%table1(x= ~ 
+               sex +
+                 ethnicity_baseline+
+              age +
+              weight_baseline+
+              waist_height_ratio_baseline_2+
+              bmi_baseline+
+              SLE_Duration_Months+
+              SLEDAI_score_baseline+
+              slicc_score_baseline+
+              aerobic_capacity_screening +
+                hrmax_screening+
+                borg_skala_efter_test_screening+
+                watt_max_screening+
+              aerobic_capacity_baseline +
+                hrmax_baseline+
+                borg_skala_efter_test_baseline+
+                watt_max_baseline+
+              FSS_baseline +
+                vas_fatigue_baseline+
+                sla_qvas_baseline+
+                vas_sledai_physician_baseline+
+              sf36_physical.component.score_baseline+
+              sf36_mental.component.score_baseline+
+              duration_daily_MVPA_pla_baseline+
+              Energy_kJ_mean_baseline+
+                fat_g_mean_baseline+
+                carbohydrate_g_mean_baseline+
+                protein_g_mean_baseline+
+              total_fat_percentage_baseline+
+                total_fat_kg_baseline+
+                android_fat_mass_kg_baseline+
+                gynoid_fat_mass_kg_baseline+
+                total_muscle_mass_kg_baseline+
+              m_1_2_baseline+
+              m_3_4_baseline+
+              m_5_12_baseline+
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+                hemoglobin_baseline+
+                thrombocytes_baseline+
+                eGFR_baseline+
+              beta2_microglobuline_baseline|
+              treatment,
+              render=rndr.abbreviated,
+              #render.continuous = "Mean (SD)",
+              #render.categorical = ,
+            #render.missing = T,
+            data = .)
+
+  table.text<-c(
+            "Categorical variables given as N(Percentage) \n 
+            Variables assumed to be normally distributed given as Mean(SD) \n
+            Variables witout assumption of normality given as Median [Q1,Q3]",
+            "Test 1 denotes the first test done on the initial visit. \n
+          Test 2 denotes the second test done following the OGTT \n
+            SLE: Systemic Lupus Erythematosus, SLEDAI: Systemic Lupus Erythematosus Disease Activity Index, SLICC EULAR/ACR 2019: Systemic Lupus International Classification Criteria point as defined by American College of Rheumatology & European League Against Rheumatism in 2019 \n
+            FSS: Fatigue Severity Scale, IFN: Interferon, DXA: Dual X-ray Absorptiometry Scan, VO\u2082max: Maximal Oxygen Uptake, not corrected for body weight, MVPA: Moderate or Vigorous Activity
+            ")
+abbr.text <- c("Table 1", table.text)
+t1a.abbr.flex <- t1flex(t1a.abbr)%>%add_footer_lines(
+ values = abbr.text
+)
+t1a.abbr.flex%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table1.abbreviated",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+t1a.m12elevated.abbr<-data.table1.wide%>%filter(!is.na(m_1_2_elevated))%>%
+  table1(x= ~
+              sex +
+              ethnicity_baseline+
+              age +
+              weight_baseline+
+              waist_height_ratio_baseline_2+
+              bmi_baseline+
+              SLE_Duration_Months+
+              SLEDAI_score_baseline+
+              slicc_score_baseline+
+              aerobic_capacity_screening +
+                hrmax_screening+
+                borg_skala_efter_test_screening+
+                watt_max_screening+
+              aerobic_capacity_baseline +
+                hrmax_baseline+
+                borg_skala_efter_test_baseline+
+                watt_max_baseline+
+              FSS_baseline +
+                vas_fatigue_baseline+
+                sla_qvas_baseline+
+                vas_sledai_physician_baseline+
+              duration_daily_MVPA_pla_baseline+
+              Energy_kJ_mean_baseline+
+                fat_g_mean_baseline+
+                carbohydrate_g_mean_baseline+
+                protein_g_mean_baseline+
+              total_fat_percentage_baseline+
+                android_fat_mass_kg_baseline+
+                gynoid_fat_mass_kg_baseline+
+                total_muscle_mass_kg_baseline+
+              m_1_2_baseline+
+              m_3_4_baseline+
+              m_5_12_baseline+
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+                hemoglobin_baseline+
+                thrombocytes_baseline+
+                eGFR_baseline+
+              beta2_microglobuline_baseline|
+              m_1_2_elevated*treatment,
+              render=rndr.abbreviated,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+
+t1a.m12elevated.abbr <- t1flex(t1a.m12elevated.abbr)%>%add_footer_lines(
+ values = c("Table 1", table.text))
+t1a.m12elevated.abbr%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table1_abbreviated_stratified_m12",
+                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = 
+                                       officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
+
+t1a.m12elevated.abbr
+
+t1.medication<-data.table1.wide%>%table1(x= ~ 
+              prednisolone_baseline+
+              plaquenil_baseline+
+              methotrexate_baseline+
+              mycophenolate_baseline+
+              ciclosporine_baseline+
+              azathioprine_baseline|
+              treatment,
+              #render=rndr,
+              render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t1.medication)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table1_medication",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+t1.slicc.criteria <- data.table1.wide%>%table1(x = ~
+                slicc_score_baseline+
+                slicc_antidsdna_baseline+
+                slicc_antismith_baseline+
+                slicc_cat_fever_baseline +
+                slicc_cat_AcuteCutLupus_baseline+
+                slicc_cat_SubAcuteCutorDiscLupus_baseline+
+                slicc_cat_OralUlcers_baseline+
+                slicc_cat_Alopecia_baseline+
+                slicc_cat_NoMuco_baseline+
+                slicc_cat_synovitis_baseline+
+                slicc_cat_arthralgia_baseline+
+                slicc_cat_nojoint_baseline+
+                slicc_cat_seizure_baseline+
+                slicc_cat_psychosis_baseline+
+                slicc_cat_delirium_baseline+
+                slicc_cat_none_baseline+
+                slicc_cat_acutepericarditis_baseline+
+                slicc_cat_pleuralorpericardialeffusion_baseline+
+                slicc_cat_noserositis_baseline+
+                slicc_cat_hemolyticAnemia_baseline+
+                slicc_cat_thrombocytopenia_baseline+
+                slicc_cat_leucopenia_baseline+
+                slicc_cat_nohematology_baseline+
+                slicc_cat_class3or4nephritis_baseline+
+                slicc_cat_class2or5nephritis_baseline+
+                slicc_cat_proteinuria_baseline+
+                slicc_cat_nonephrologic_baseline+
+                slicc_cat_antibeta2glykoprotein_baseline+
+                slicc_cat_lupusanticoagulant_baseline+
+                slicc_cat_anticardiolipins_baseline+
+                slicc_cat_noantiphospholipids_baseline+
+                slicc_cat_lowC3andC4_baseline+
+                slicc_cat_lowC3orC4_baseline+
+                slicc_cat_normalC3andC4_baseline+
+                slicc_antidsdna_baseline+
+                slicc_antismith_baseline|
+              treatment,
+              render=rndr,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t1.slicc.criteria)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table1_slicc",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+t1.blood.samples <- data.table1.wide%>%table1(x = ~
+              hemoglobin_baseline+
+              leucocytes_baseline+
+              thrombocytes_baseline+
+              lymphocytes_baseline+
+              interleukin_6_baseline+
+              beta2_microglobuline_baseline+
+              complement_c3_baseline+
+              complement_c4_baseline+
+              anti_dsDNA_baseline|
+              treatment,
+              #render=rndr,
+              render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t1.blood.samples)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table1_bloodsamples",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+t1.strat.m.1.2=data.table1.wide%>%filter(!is.na(m_1_2_elevated))%>%table1(x= ~ 
+              sex +
+              age +
+              weight_baseline+
+              waist_height_ratio_baseline+
+              bmi_baseline+
+              aerobic_capacity_screening +
+              aerobic_capacity_baseline +
+              FSS_baseline +
+              SLEDAI_score_baseline+
+              slicc_score_baseline+
+              prednisolone_baseline+
+              plaquenil_baseline+
+              methotrexate_baseline+
+              mycophenolate_baseline+
+              ciclosporine_baseline+
+              azathioprine_baseline|
+              m_1_2_elevated*treatment,data = .,
+              #render.continuous = my.render.cont,
+              #render.categorical = my.render.cat,
+            render.missing = NULL)
+t1flex(t1.strat.m.1.2) 
+
+t1.strat.quant.m.1.2=data.table1.wide%>%filter(!is.na(m_1_2_elevated))%>%table1(x= ~ 
+              sex +
+              age +
+              weight_baseline+
+              waist_height_ratio_baseline+
+              bmi_baseline+
+              aerobic_capacity_screening +
+              aerobic_capacity_baseline +
+              FSS_baseline +
+              SLEDAI_score_baseline+
+              slicc_score_baseline+
+              prednisolone_baseline+
+              plaquenil_baseline+
+              methotrexate_baseline+
+              mycophenolate_baseline+
+              ciclosporine_baseline+
+              azathioprine_baseline|
+              treatment*m_1_2_quantile_at_baseline,data = .,
+              #render.continuous = my.render.cont,
+              #render.categorical = my.render.cat,
+            render.missing = NULL)
+t1flex(t1.strat.quant.m.1.2) 
+
+#t1b=data.table1%>%filter(timepoint !="followup")%>%
+#  filter(id!="lup_008")%>%table1(x= ~ 
+#            aerobic_capacity + FSS |treatment*timepoint*m_1_2_quantile_at_baseline,data = .,
+#              render.continuous = my.render.cont,
+#              render.categorical = my.render.cat,
+#            render.missing = NULL)
+#t1flex(t1b) 
+
+#tab1 = table1(~ sex_calc + visitage + height + weight + bmi + hypertension + 
+ #               ihs + hjertesvigt + bloodthinner +
+  #              cholesterollowering + smoking  + diabetes + kol,
+   #           data = demo,
+    #          render.continuous = my.render.cont,
+     #         render.categorical = my.render.cat, render.missing = NULL)
+
+#renv::install("flextable")
+
+# Convert to flextable
+
+#variables_table1 <- read_excel(here("Input","Variables_for_table1.xlsx"), header=T)
+
+```
+
+# Table 2 - change scores
+
+```{r}
+data.table1.wide<-data.table1.wide %>% mutate(
+  aerobic_capacity_change_from_screening = 
+    aerobic_capacity_followup - aerobic_capacity_screening,
+  aerobic_capacity_change_from_baseline = 
+    aerobic_capacity_followup - aerobic_capacity_baseline,
+  vo2max_change_from_baseline = vo_2_max_followup - vo_2_max_baseline,
+  vo2max_change_from_screening = vo_2_max_followup - vo_2_max_screening,
+  hrmax_change_from_baseline = hrmax_followup - hrmax_baseline,
+  hrmax_change_from_screening = hrmax_followup - hrmax_screening,
+  FSS_change = FSS_followup - FSS_baseline,
+  MVPA_change = duration_daily_MVPA_pla_followup - duration_daily_MVPA_pla_baseline,
+  Energy_intake_change = Energy_kJ_mean_followup - Energy_kJ_mean_baseline,
+  bmi_change = bmi_followup - bmi_baseline,
+  SF_36_mental_change = sf36_mental.component.score_followup - sf36_mental.component.score_baseline,
+  SF_36_physical_change = sf36_physical.component.score_followup - sf36_physical.component.score_baseline
+)
+
+label(data.table1.wide$aerobic_capacity_change_from_screening) <- "Aerobic Capacity Change from test 1"
+units(data.table1.wide$aerobic_capacity_change_from_screening) <- "mL/min/kg"
+
+label(data.table1.wide$hrmax_change_from_baseline) <- "Maximal Heart Rate Change from test 2"
+units(data.table1.wide$hrmax_change_from_baseline) <- "1/min"
+
+label(data.table1.wide$hrmax_change_from_screening) <- "Maximal Heart Rate Change from test 1"
+units(data.table1.wide$hrmax_change_from_screening) <- "1/min"
+
+label(data.table1.wide$SF_36_mental_change)<-"SF-36 Mental Change from baseline"
+label(data.table1.wide$SF_36_physical_change)<-"SF-36 Physical Change from baseline"
+
+label(data.table1.wide$aerobic_capacity_change_from_baseline) <- "Aerobic Capacity Change from test 2"
+units(data.table1.wide$aerobic_capacity_change_from_baseline) <- "mL/min/kg"
+
+label(data.table1.wide$vo2max_change_from_baseline) <- "Maximal Oxygen Uptake change from test 2"
+units(data.table1.wide$vo2max_change_from_baseline) <- "mL/min"
+
+label(data.table1.wide$vo2max_change_from_screening) <- "Maximal Oxygen Uptake change from test 1"
+units(data.table1.wide$vo2max_change_from_screening) <- "mL/min"
+
+label(data.table1.wide$FSS_change) <- "Fatigue Severity Scale Change"
+
+label(data.table1.wide$Energy_intake_change) <- "Change in energy intake"
+units(data.table1.wide$Energy_intake_change) <- "kJ"
+
+label(data.table1.wide$MVPA_change) <- "Change in MVPA"
+units(data.table1.wide$MVPA_change) <- "minutes"
+
+label(data.table1.wide$bmi_change) <- "Change in BMI"
+
+list_normal_dist <- list_normal_dist %>% append(c("Energy_intake_change","FSS_change", "vo2max_change_from_baseline", "vo2max_change_from_screening"))
+
+t2a<-data.table1.wide%>%table1(x= ~ 
+                aerobic_capacity_change_from_screening+
+                  vo2max_change_from_screening+
+                aerobic_capacity_change_from_baseline+
+                  vo2max_change_from_baseline+
+                SF_36_mental_change+
+                SF_36_physical_change+
+                FSS_change+
+                Energy_intake_change+
+                MVPA_change+
+                bmi_change|
+              treatment,
+              render=rndr,
+              overall=F,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t2a)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table2",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+t2a.m12.quantile<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_baseline))%>%table1(x= ~ 
+                aerobic_capacity_change_from_screening+
+                  vo2max_change_from_screening+
+                aerobic_capacity_change_from_baseline+
+                  vo2max_change_from_baseline+
+                SF_36_mental_change+
+                SF_36_physical_change+
+                FSS_change+
+                Energy_intake_change+
+                MVPA_change+
+                bmi_change|
+              treatment*m_1_2_quantile_at_baseline,
+              render=rndr,
+              overall=F,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t2a.m12.quantile)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table2_stratified_m12quants",
+                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = 
+                                       officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
+
+t2a.elevated<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_baseline))%>%table1(x=~ 
+                aerobic_capacity_change_from_screening+
+                  vo2max_change_from_screening+
+                aerobic_capacity_change_from_baseline+
+                  vo2max_change_from_baseline+
+                SF_36_mental_change+
+                SF_36_physical_change+
+                FSS_change+
+                Energy_intake_change+
+                MVPA_change+
+                bmi_change|
+              m_1_2_elevated*treatment,
+              render=rndr,
+              overall=F,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t2a.elevated)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table2_stratified_m12elevation",
+                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = 
+                                       officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
+
+
+t2a.abbreviated<-data.table1.wide%>%table1(x= ~ 
+                aerobic_capacity_change_from_screening+
+                  vo2max_change_from_screening+
+                  hrmax_change_from_screening+
+                aerobic_capacity_change_from_baseline+
+                  vo2max_change_from_baseline+
+                  hrmax_change_from_baseline+
+                SF_36_mental_change+
+                SF_36_physical_change+
+                FSS_change+
+                Energy_intake_change+
+                MVPA_change+
+                bmi_change|
+              treatment,
+              render=rndr.abbreviated,
+              overall=F,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1flex(t2a.abbreviated)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table2_abbreviated",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = NULL, align = "center")
+
+t2a.elevated.abbreviated<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_baseline))%>%table1(x=~ 
+                aerobic_capacity_change_from_screening+
+                  vo2max_change_from_screening+
+                  hrmax_change_from_screening+
+                aerobic_capacity_change_from_baseline+
+                  vo2max_change_from_baseline+
+                  hrmax_change_from_baseline+
+                SF_36_mental_change+
+                SF_36_physical_change+
+                FSS_change+
+                Energy_intake_change+
+                MVPA_change+
+                bmi_change|
+              m_1_2_elevated*treatment,
+              render=rndr.abbreviated,
+              overall=F,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+
+t1flex(t2a.elevated.abbreviated)%>%save_as_docx( values = NULL, path=here("Output","Tables",
+                                                   paste0(
+                                                     "table2_abbreviated_m12elevation",
+                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                                                     ".docx"
+                                                   )
+                                                   ), pr_section = 
+                                       officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
+```
+
 # Data Wrangling for analysis of all genes
 
-Using suggestions from Kanwal Siddiqi
+Using suggestions from Kanwal Siddiqi - we do this in a seperate document
 
 ```{r eval = F}
 nanostring_norm
@@ -1520,226 +3040,5 @@ rownames(diffex.data) <- nanostring_norm$`Probe Name`
 
 
 
-PVals_ExFUvsNoExFu <- apply(nanostring_norm[-1],1,function(x) t.test(x[exercisers],x[nonexercisers]))
-```
-
-## Using RNASEQ2 package.
-
---- I can't get the below code to work. I think I will try making my own above and not evaluating this. #TODO
-
-https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#standard-workflow
-
-Love, M.I., Huber, W., Anders, S. (2014) Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. *Genome Biology*, **15**:550. [10.1186/s13059-014-0550-8](http://dx.doi.org/10.1186/s13059-014-0550-8)
-
-https://www.biorxiv.org/content/10.1101/2020.04.08.032490v3.full.pdf
-
-```{r warning=F}
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-#install.packages("fastmap", force = T)
-library(fastmap)
-
-#BiocManager::install("rnaseqGene")
-#browseVignettes("rnaseqGene")
-library(rnaseqGene)
-#library(tximeta)
-
-
-
-```
-
-## Create data sets
-
-```{r}
-
-
-column.data.to.remove1 <- nanostring_biox %>% 
-  dplyr::rename(id=ID)%>%
-  dplyr::select(c(BX_ID, timepoint, id)) %>%
-  mutate(id = to_snake_case(id))%>%
-  left_join(group, by = join_by(id))%>%
-  filter(timepoint=="Extra")
-
-column.data.to.remove2 <- nanostring_biox %>% 
-  dplyr::rename(id=ID)%>%
-  dplyr::select(c(BX_ID, timepoint, id)) %>%
-  mutate(id = to_snake_case(id))%>%
-  left_join(group, by = join_by(id))%>%
-  filter(is.na(treatment))
-
-count.data <- nanostring %>% 
-  dplyr::select(!c("Class Name", 
-                   "Probe Name",
-                    BX0616_014, 
-                    BX0616_103,  
-                    BX0616_110,
-                   column.data.to.remove1$BX_ID,
-                   column.data.to.remove2$BX_ID)
-                )%>%as.data.frame()
-
-rownames(count.data)<-nanostring$`Probe Name`
-
-head(count.data)
-#str(count.data)
-count.data<-as.data.frame(lapply(count.data,as.numeric))
-#str(count.data)
-
-
-column.data <- nanostring_biox %>% 
-  dplyr::rename(id=ID)%>%
-  dplyr::select(c(BX_ID, timepoint, id)) %>%
-  mutate(id = to_snake_case(id))%>%
-  left_join(group, by = join_by(id))%>%
-  filter(!is.na(treatment) )%>%
-  filter(timepoint!="Extra")
-
-
-all(colnames(count.data) == column.data$BX_ID)
-
-
-
-library("DESeq2")
-dds <- DESeqDataSetFromMatrix(countData = count.data,
-                              colData = column.data,
-                              design = ~ timepoint + timepoint:treatment)
-dds
-dds <- DESeq(dds)
-res <- results(dds)
-res
-
-summary(res)
-#View(res)
-
-plotMA(res, ylim=c(-2,2))
-```
-
-## Using DEseq for the volcanoplots
-
-```{r}
-
-
-
-#dds <- DESeqDataSetFromMatrix(countData = nanostringforvolcano,
- #                             colData = column.data,
-  #                            design= ~ batch + condition)
-#dds <- DESeq(dds)
-#resultsNames(dds) # lists the coefficients
-#res <- results(dds, name="condition_trt_vs_untrt")
-# or to shrink log fold changes association with condition:
-#res <- lfcShrink(dds, coef="condition_trt_vs_untrt", type="apeglm")
-```
-
-## Using the Limma Package
-
-As the DEseq2 doesn't account for mixed effect models, staying more true to our original design would be having a random effect of id. This is also a boon because I have problems getting the DEseq2 to compile correctly.
-
-We are using this guide: https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html
-
-We should remember to cite this: Ritchie, ME, Phipson, B, Wu, D, Hu, Y, Law, CW, Shi, W, and Smyth, GK (2015). limma powers differential expression analyses for RNA-sequencing and microarray studies. Nucleic Acids Research 43(7), e47
-
-Also we could use this as a guideline:
-
-<https://www.researchgate.net/publication/377981363_Impact_of_modeled_microgravity_stress_on_innate_immunity_in_a_beneficial_animal-microbe_symbiosis>
-
-```{r limma dependencies, warning = F}
-#BiocManager::install("Glimma")
-#BiocManager::install("Mus.musculus")
-library(limma)
-library(Glimma)
-library(edgeR)
-library(Mus.musculus)
-renv::update()
-```
-
-So we should build the data from the count matrix
-
-```{r}
-count.data 
-
-
-all(colnames(count.data) == column.data$BX_ID)
-
-column.data2 <- column.data %>% mutate(
-  treat = case_when(
-    timepoint == "Baseline" ~ "None",
-    treatment == "Søløve" ~ "Søløve",
-    treatment == "Pingvin" ~ "Pingvin",
-    T ~ "None"
-  )
-    ,
-  farve = case_when(
-    treat== "Søløve" ~ "Blue",
-    treat == "Pingvin" ~ "Red",
-    treat == "None" ~ "Black",
-    T~ "Black"
-  )
-)
-
-
-#get sex to id,
-sex.id <- rawdata %>% as.data.frame()%>%mutate(id=to_snake_case(allocation_no))%>% dplyr::select(id, sex) 
-sex.id <- sex.id[!duplicated(sex.id$id),]
-
-column.data2<- left_join(column.data2, sex.id)
-
-
-
-DGE.count.data <- DGEList(counts = count.data, group = column.data2$treatment)
-DGE.count.data$samples$timepoint <- column.data2$timepoint
-DGE.count.data$samples$id <- column.data2$id
-DGE.count.data$samples$sex <- column.data2$sex
-DGE.count.data$samples$treat <- column.data2$treat
-DGE.count.data$samples$treatment <- column.data2$treatment
-
-all(colnames(DGE.count.data) == column.data2$BX_ID)
-
-plotMDS(DGE.count.data, labels = column.data2$id, plot=T, col = (column.data2$farve))
-
-norm.factor.count.data <- calcNormFactors(DGE.count.data)
-DGE.count.data <- calcNormFactors(DGE.count.data)
-
-#keep.exprs <- filterByExpr(DGE.count.data, design=design)
-#x <- DGE.count.data[keep.exprs,, keep.lib.sizes=FALSE]
-#dim(x)
-
-```
-
-### LIMMA Specify the model
-
-```{r evaluate = F}
-
-norm.factor.count.data <- calcNormFactors(DGE.count.data, method ="TMM")
-all(colnames(norm.factor.count.data) == column.data$BX_ID)
-
-norm.factor.count.data$samples$norm.factors
-#TODO continue down this rabbit hole 
-design <- model.matrix(~0+timepoint+treatment+treatment*timepoint+sex,data=DGE.count.data$samples)
-colnames(design) <- gsub("group", "", colnames(design))
-design
-
-
-v<- voom(DGE.count.data, design = design, block=DGE.count.data$samples$id,plot = T)
-v
-#contr.matrix <- makeContrasts(
- #  "Ex Vs No Ex" = treatmentSøløve, 
-  # "Followup vs Baseline" = timepointFollowup - timepointBaseline, 
-   #levels = colnames(design))
-#contr.matrix
-#getEAWP(v)
-#install.packages("statmod")
-library(statmod)
-#duplicateCorrelation(object = v, design)
-library(limma)
-library(edgeR)
-dupC <- limma::duplicateCorrelation(object = v, design = design, block = v$targets$id)
-
-vfit <- lmFit(v, correlation = dupC, design = design)
-efit <- eBayes(vfit)
-plotSA(efit, main="Final model: Mean-variance trend")
-
-cnf.DGE.count.data <- calcNormFactors(DGE.count.data)
-fit <- voomLmFit(cnf.DGE.count.data, design = design, plot=TRUE)
-fit <- eBayes(fit)
-
-volcanoplot(fit)
+#PVals_ExFUvsNoExFu <- apply(nanostring_norm[-1],1,function(x) t.test(x[exercisers],x[nonexercisers]))
 ```
