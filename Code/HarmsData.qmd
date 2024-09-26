@@ -1,0 +1,35 @@
+---
+title: "Harms_data"
+author: "Malte Lund Adamsen"
+format: html
+editor: visual
+---
+
+# Harms Data
+
+## Load Packages
+
+```{r}
+library(renv)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(LMMstar)
+library(plotly)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+```
+
+## Import Data
+
+```{r}
+
+harms.data<-read_excel(path = here("Data",paste0("SLEDAI.data.xlsx")))
+```

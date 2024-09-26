@@ -13,6 +13,7 @@ library(renv)
 #install.packages("readxl")
 library("readxl")
 library(dplyr)
+library(tidyr)
 library(here)
 library(snakecase)
 library(ggplot2)
@@ -35,6 +36,17 @@ library(officer)
 #set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
 ```
 
+## Choose mITT, PP or ITT (by leaving both F)
+
+```{r}
+mITT = F
+PP = T
+
+#IF you have full access to the data set this to true, if you do not have full access and this is not set to false, the code will not work
+fullaccess = T
+
+```
+
 ## Importing the data
 
 ```{r warning = F}
@@ -50,11 +62,88 @@ biox<-read_excel((path=here("data/NanoStringData/BioXpedia_BX0616_OnlyCols.xlsx"
 ### Create modified data with mITT and PP from rawdata
 
 ```{r}
-data<-rawdata%>%rowwise()%>%mutate(
+group<-read_excel(path=here("data","RandomizationKey_Final.xlsx"))%>%
+  select(ID,`True Allocation`)%>%
+  rename(treatment=`True Allocation`)%>%
+  mutate( treatment = case_when( treatment == "Træning" ~ "exercise",
+                                 treatment == "Kontrol" ~ "control",
+                                 T ~ NA_character_))
+colnames(group)<-to_snake_case(colnames(group))
+group$id<-to_snake_case(group$id)
+
+
+
+
+
+```
+
+## Compliance data
+
+```{r}
+  exercise_compliance <- read_excel(path=
+                                      here("data", "Exercise_Data_LupEx_ID_Tilpasset.xls"))|>
+    mutate(
+                                        id = to_snake_case(id)
+                                      )
+  exercise_attendance <- exercise_compliance|>
+    count(id)|>
+    rename(attendance = n)|>
+    mutate(
+      attendance_sufficient = case_when(
+        attendance >= 29 ~ T,
+        T ~ F))
+  exercise_compliance_summed <- 
+    exercise_compliance|>
+    count(id, `[Zone 5 i 8?]`)|>
+    pivot_wider(
+      id_cols = id, names_from = `[Zone 5 i 8?]`, values_from = n
+    )|>rename(
+      "unsuccesful_exercise" = "0",
+      "successful_exercise" = "1",
+      "unknown_exercise_effect" = "NA"
+    )|>mutate(
+      succesful_HIIT = case_when(
+        successful_exercise >= 29 ~ T,
+        T ~ F)
+      )
+      
+  exercise_merged <- 
+    merge(exercise_attendance, exercise_compliance_summed)|>
+    mutate(succes_percentage=
+      successful_exercise / attendance * 100
+    )
+  hist(exercise_merged$succes_percentage)
+  
+  count(exercise_merged,succesful_HIIT)
+  count(exercise_merged,attendance_sufficient)
+  median(exercise_compliance$`[Tid pulszone 1]`, na.rm = T)
+  median(exercise_compliance$`[Tid pulszone 2]`, na.rm = T)
+  median(exercise_compliance$`[Tid pulszone 3]`, na.rm = T)
+  median(exercise_compliance$`[Tid pulszone 4]`, na.rm = T)
+  median(exercise_compliance$`[Tid pulszone 5]`, na.rm = T)
+  mean(exercise_compliance$`[Tid pulszone 5]`, na.rm = T)
+  sd(exercise_compliance$`[Tid pulszone 5]`, na.rm = T)
+  hist(exercise_compliance$`[Tid pulszone 5]`)
+  quantile(exercise_compliance$`[Tid pulszone 5]`, na.rm=T)
+    
+  quantile(exercise_compliance_summed$successful_exercise, na.rm =T)
+  sd(exercise_compliance_summed$successful_exercise, na.rm =T)
+  
+  quantile(exercise_merged$attendance, na.rm = T)
+   quantile(exercise_merged$successful_exercise, na.rm =T)
+
+ 
+```
+
+```{r}
+data<-
+  rawdata%>%
+  rowwise()%>%
+  mutate(
   schema_name = case_when(
     is.na(schema_name) ~ "2g. Visit 2: Spørgeskemaer",
-    T~ schema_name
-  ))%>%ungroup()%>%
+    T~ schema_name))%>%
+  ungroup()%>%
   mutate(id = to_snake_case(allocation_no),
            mITT = case_when(
              allocation_no == "LUP003" ~ #Excluded due to pre-transplantation
@@ -74,54 +163,10 @@ data<-rawdata%>%rowwise()%>%mutate(
                task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion_002" ~ 1,
                T ~ 1
              ),
-             T ~ 1),
-         PP = case_when( #TODO when we get the PP we need to add this variable.
-             T ~ 0)
-           )
-
-```
-
-## Choose mITT, PP or ITT (by leaving both F)
-
-```{r}
-mITT = T
-PP = F
-if (mITT){
-  data<-data%>%filter(
-    mITT == 1
-  )
-  
-}
-
-if (PP){
-  data<-data%>%filter(
-    PP == 1
-  )
-}
-
-#IF you have full access to the data set this to true, if you do not have full access and this is not set to false, the code will not work
-fullaccess = T
-
-```
-
-## Creating data as sets
-
-```{r evaluate = F}
-
-not_all_na <- function(x) any(!is.na(x))
-
-aerobiccapacity.data <- rawdata %>% filter( schema_name=="2e. Visit 2: VO2max protokol") %>% select(where(not_all_na))%>%mutate(
-  borg=`borg_skala_efter_test`+6,
-  timepoint=case_when(
-    task_name == "Visit 5 - Follow-Up" ~ "followup",
-    task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
-     grepl("Baseline",task_name) ~ "baseline", #TODO finish this: This line is supposed to find the latest of the baseline variables and use that as the date. 
-    T~NA_character_
-  )
-)%>%rename(id=allocation_no)
-
-
-
+             T ~ 1))|>
+    left_join(exercise_merged)|>filter(
+      mITT == 1
+    )
 ```
 
 ## Transposing the Nanostring Data
@@ -260,6 +305,56 @@ cytokine_score_sets <- list(
 IFN2.Siddiqi = c("S100A9", 
                  "S100A8",
                  "FCGR1A"),
+IFN.alpha.cluster.Siddiqi = 
+  c("CCL2", 
+    #"CMPK2", 
+    "DDX58",
+    "DDX60", 
+    "EPSTI1",
+    "HERC5",
+    "HERC6",
+    "IFI27",
+    "IFI35",
+    "IFI44",
+    "IFI44L",
+    "IFI6",
+    "IFIH1",
+    "IFIT1",
+    "IFIT2",
+    "IFIT3",
+    "IFIT5",
+    "IFITM3",
+    "IRF7",
+    "ISG15",
+    "LAMP3",
+    "LGALS3BP",
+    "LY6E",
+    "MS4A4A", 
+    "MX1", 
+    "OAS1", 
+    "OAS2", 
+    "OAS3", 
+    "OASL", 
+    "PLSCR1", 
+    "RSAD2", 
+    "RTP4", 
+    "SIGLEC1", 
+    #"SPATS2L", 
+    #"USP18", 
+    "ZBP1"),
+IFN.beta.cluster.Siddiqi = c(
+  "SERPING1",
+  "PARP9",
+  "CXCL10",
+  "SOCS1",
+  "C1QB",
+  "PDCD1LG2"),
+IFN.gamma.cluster.Siddiqi =c(
+  "S100A9",
+  "FCGR1A",
+  "S100A8",
+  "SOCS3"
+),
 IL6 = c("A2M",
         "ADCY7",
         #"AER61", #NOT IN DATASET BUT WANTED BY PROTOCL (??),
@@ -354,7 +449,15 @@ Cytokine_Panel_aggregates<-Z_scores_nano %>% mutate(
   IL.6.related =  rowMeans(select(Z_scores_nano,
                           cytokine_score_sets$IL6)),
   TNF.related =  rowMeans(select(Z_scores_nano,
-                          cytokine_score_sets$TNF))
+                          cytokine_score_sets$TNF)),
+  IFN.alpha.Siddiqi =  rowMeans(select(Z_scores_nano,
+                          cytokine_score_sets$IFN.alpha.cluster.Siddiqi)),
+  IFN.beta.Siddiqi =  rowMeans(select(Z_scores_nano,
+                          cytokine_score_sets$IFN.beta.cluster.Siddiqi)),
+  IFN.gamma.Siddiqi =  rowMeans(select(Z_scores_nano,
+                          cytokine_score_sets$IFN.gamma.cluster.Siddiqi))
+                          
+                          
   ) 
 
 #Geometric Mean scores calculated as described in the protocol 3.9.9.2. This method uses a different tactic than the one described in the protocol, while the result is mathmatically the same, the protocol says to take the nth root of the product of n-genes in each panel, this method instead takes logarithm of each gene, averages those, and then takes the exponent. Which is mathematically equivalent. Here is a simply test to show that:
@@ -381,7 +484,14 @@ Cytokine_Panel_geomeans<-nanostring_biox %>% mutate(
   IL.6.related.Geomean = exp(rowMeans(log(select(nanostring_biox,
                           cytokine_score_sets$IL6)))),
   TNF.related.Geomean = exp(rowMeans(log(select(nanostring_biox,
-                          cytokine_score_sets$TNF)))))
+                          cytokine_score_sets$TNF)))),
+  IFN.alpha.Siddiqi.Geomean = exp(rowMeans(log(select(nanostring_biox,
+                          cytokine_score_sets$IFN.alpha.cluster.Siddiqi)))),
+  IFN.beta.Siddiqi.Geomean = exp(rowMeans(log(select(nanostring_biox,
+                          cytokine_score_sets$IFN.beta.cluster.Siddiqi)))),
+  IFN.gamma.Siddiqi.Geomean = exp(rowMeans(log(select(nanostring_biox,
+                          cytokine_score_sets$IFN.gamma.cluster.Siddiqi))))
+  )
 
 cytokine_scores <- Cytokine_Panel_aggregates%>%
   select(ID,timepoint,
@@ -389,14 +499,21 @@ cytokine_scores <- Cytokine_Panel_aggregates%>%
         IFN1.EL.Sherb,IFN2.EL.Sherb,
         IFN2.Siddiqi,
         IL.6.related,
-        TNF.related)%>%merge(
-          select(Cytokine_Panel_geomeans,
+        TNF.related,
+        IFN.alpha.Siddiqi,
+        IFN.beta.Siddiqi,
+        IFN.gamma.Siddiqi)%>%
+  merge( select(Cytokine_Panel_geomeans,
                  ID,timepoint,
         M1.2.Geomean,M3.4.Geomean,M5.12.Geomean, 
         IFN1.EL.Sherb.Geomean,IFN2.EL.Sherb.Geomean,
         IFN2.Siddiqi.Geomean,
         IL.6.related.Geomean,
-        TNF.related.Geomean)
+        TNF.related.Geomean,
+        IFN.alpha.Siddiqi.Geomean,
+        IFN.beta.Siddiqi.Geomean ,
+        IFN.gamma.Siddiqi.Geomean
+        )
         )
 
 cytokine_scores<-cytokine_scores%>%filter(!is.na(ID))
@@ -410,22 +527,41 @@ write_xlsx(nanostring_biox, path=here("output","nanostring_ID_as_rows.xlsx"))
 cytokine_baseline<-cytokine_scores%>%filter(timepoint=="Baseline")%>%dplyr::select(-timepoint)
 ```
 
-## Merge cytokinescores at baseline and randomization information
+##Add Group and Cytokine Sets together
 
 ```{r}
-group<-read_excel(path=here("data","RandomizationKey_pingvin_søløve.xlsx"))%>%select(ID,Allocation)%>%
-  rename(treatment=Allocation)
-colnames(group)<-to_snake_case(colnames(group))
-group$id<-to_snake_case(group$id)
-
-
-
 #cytokine_baseline$id<-to_snake_case(cytokine_baseline$id)
 group_cytokine<-merge(group,
                       cytokine_baseline, all=T)
 
 write_xlsx(group_cytokine, path = here("Data","grouping_cytokine.xlsx"))
 
+
+#Add compliancedata
+
+  Compliance_info_group_cytokine<-
+    group_cytokine |> 
+    left_join(exercise_merged, by=join_by(id)) |>
+    mutate(
+    protocol_violator = case_when(
+      treatment == "control" ~ F,
+      treatment == "exercise" ~ !succesful_HIIT,
+      T~ NA
+    ),
+    PP = !protocol_violator
+  )|>relocate(
+    id, PP
+  )
+  
+  PP_list<-Compliance_info_group_cytokine |> dplyr::select(
+    id, PP, attendance:protocol_violator
+  )
+  
+  write_xlsx(
+    PP_list,
+    path=here("Output","Compliance.xlsx")
+  )
+  
 ```
 
 ### Merge group and cytokine data with other datasets
@@ -439,12 +575,9 @@ require(stringr)
 data$schema_name<-data$schema_name%>%snakecase::to_snake_case()%>%str_replace_all("[:digit:]", "")
 schema_names<-unique(data$schema_name)
 
-
-
-
 ```
 
-## Write all data to sets
+## loop to Write all data to sets
 
 ```{r}
 
@@ -453,12 +586,12 @@ schema_names<-unique(data$schema_name)
 not_all_na <- function(x) any(!is.na(x))
 
 for (schema in schema_names){
-  nam<-paste(as.character(schema),ifelse(PP,".PP",""),ifelse(mITT,".mITT",""),".data", sep="") 
+  nam<-paste(as.character(schema),".data", sep="") 
   
   df<-data %>% 
     filter( schema_name==schema) %>% 
     select(where(not_all_na))%>%
-    left_join(y=group_cytokine, join_by(id))
+    left_join(y=group_cytokine, by = join_by(id))
 
   write_xlsx(df,path=paste(here("Data/easy_trial_seperate_schemes/",paste(nam,".xlsx"))))
   assign(nam, df)
@@ -474,10 +607,9 @@ First created in the vo2maxdata.qmd file, but I wanted it here for completion wi
 
 ```{r}
 vo2max.data <- read_excel(path=
-                            here(paste0("Data/easy_trial_seperate_schemes/_e_visit__vo__max_protokol.",
-                                        ifelse(mITT,"mITT",
-                                               ifelse(PP,"PP","")),
-                                        ".data .xlsx")))%>%
+                            here("Data",
+                                 "easy_trial_seperate_schemes",
+                                 "_e_visit__vo__max_protokol.data .xlsx"))%>%
   mutate(
   borg=`borg_skala_efter_test`+6,
   timepoint=
@@ -491,18 +623,39 @@ vo2max.data <- read_excel(path=
 #Constrain Baseline
 mutate(
   treat = case_when(
-    timepoint == "baseline" ~ "Pingvin",
-    timepoint == "screening" ~ "Pingvin",
+    timepoint == "baseline" ~ "control",
+    timepoint == "screening" ~ "control",
     timepoint == "followup" ~ treatment,
     T~NA_character_
   ))%>%mutate(
-    treat = factor(treat, levels = c("Pingvin", "Søløve")),
-    timepoint = factor(timepoint, levels = c("screening", "baseline", "followup"))
+    treat = factor(treat, levels = c("control", "exercise")),
+    timepoint = factor(timepoint, levels = c("screening", "baseline", "followup")),
+    operator = case_when(
+      initialer == "malte" ~ "Malte",
+      initialer == "Malte" ~ "Malte",
+      initialer == "mla" ~ "Malte",
+      initialer == "MLA" ~ "Malte",
+      initialer == "CE" ~ "Clara",
+      initialer == "CSE" ~ "Clara",
+      initialer == "Clara" ~ "Clara",
+      initialer == "SJø" ~ "Simon",
+      initialer == "IER" ~ "Iben",
+      initialer == "MLP" ~ "Marie Louise",
+      initialer == "AL" ~ "Anna",
+      initialer == "AAL" ~ "Anna",
+      initialer == "MLA + IER" ~ "Malte og Iben",
+      initialer == "CE + IR" ~ "Clara og Iben",
+      initialer == "IER+CE" ~ "Clara og Iben",
+      initialer == "AL+CE" ~ "Anna og Clara",
+      T ~ NA_character_
+      #TODO finish this
+      
+    )
   )
 
 #write it to a file to be accessed again by the script assessing models for VO2max
 write_xlsx(x=vo2max.data, 
-           path = here("Data",paste0("vo2max", ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),".xlsx")))
+           path = here("Data","vo2max.xlsx"))
 ```
 
 ## Create questionnaires set
@@ -511,54 +664,94 @@ First created in the other .qmd file, but I wanted it here so I could use it whe
 
 ```{r}
 
-questionnaires <- read_excel(path=here("Data/easy_trial_seperate_schemes/_g_visit__spørgeskemaer.mITT.data .xlsx"))%>%mutate(
+questionnaires <- 
+  read_excel(
+  here("Data",
+            "easy_trial_seperate_schemes",
+       "_g_visit__spørgeskemaer.data .xlsx"))|>
+  mutate(
   timepoint=
   case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
     task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
-     grepl("Baseline",task_name) ~ "baseline",  
+     grepl("Baseline",task_name) ~ "baseline",
     T~NA_character_
   )
 )%>%filter(!is.na(timepoint))%>%mutate(
   id = to_snake_case(allocation_no),
   treat = case_when(
-    timepoint == "baseline" ~ "Pingvin",
-    timepoint == "screening" ~ "Pingvin",
-    timepoint == "followup" ~ treatment,
-    T~NA_character_
+    timepoint == "baseline" ~ "control",
+    timepoint == "screening" ~ "control",
+    T~treatment
   ))%>%mutate(
-    treat = factor(treat, levels = c("Pingvin", "Søløve")),
-    timepoint = factor(timepoint, levels = c("screening", "baseline", "followup"))
-  )%>%filter(!is.na(schema_version))
+    treat = factor(treat, levels = c("control", "exercise")),
+    timepoint = factor(timepoint, levels = c("screening", 
+                                             "baseline", 
+                                             "followup")),
+    across(.cols = c(sf_36_1,
+                     sf_36_2,
+                     fss_laengerevarende_aktivitet,
+                     fss_funktionsindkraenkning,
+                     slaq_unusual_headache,
+                     slaq_muskelsvaghed,
+                     sf_36_7,
+                     sf_36_8),
+           .fn = as.numeric)
+    )
 
-questionnaires <- questionnaires[,colSums(is.na(questionnaires))<nrow(questionnaires)]%>%mutate()
+#questionnaires <- questionnaires[,colSums(is.na(questionnaires))<nrow(questionnaires)]%>%mutate()
 str(questionnaires)
 
-questionnaires$fss_laengerevarende_aktivitet<-as.numeric(questionnaires$fss_laengerevarende_aktivitet)   
-questionnaires$fss_funktionsindkraenkning <-as.numeric(questionnaires$fss_funktionsindkraenkning )
-questionnaires$slaq_unusual_headache<- as.numeric(questionnaires$slaq_unusual_headache)
-questionnaires$slaq_muskelsvaghed <- as.numeric(questionnaires$slaq_muskelsvaghed)
-questionnaires$sf_36_7[56] <- 3 #TODO check this value, it is written as both 2 and 4 in the database, so I take the average.
-questionnaires$sf_36_7<-as.numeric(questionnaires$sf_36_7)
-questionnaires$sf_36_8<-as.numeric(questionnaires$sf_36_8)
+
+questionnaires_after_followup <-  read_excel(
+  here("Data",
+            "EmailQuestionnaires.xlsx"))|>
+  filter(!is.na(schema_name))|>
+  mutate(
+  id = to_snake_case(allocation_no),
+  timepoint = case_when(
+    grepl("1 mån", survey_event) ~ "1 month after followup",
+    grepl("2 mån", survey_event) ~ "2 months after followup",
+    grepl("3 mån", survey_event) ~ "3 months after followup",
+    T~NA_character_))%>%
+  filter(
+    !is.na(timepoint))|>rename_with(to_snake_case)|>
+  mutate(across(
+    .cols=c(fss_motivation:slaq_udslaet_andet, 
+            slaq_moerke_blaa_pletter:sf_36_11_d), .fn = as.numeric)) #For some reason, some questions have multiple answers, I use the first answer given to each question in this case.
+  
+str(questionnaires_after_followup)
+View(questionnaires_after_followup)
+
+questionnaires2<-
+  questionnaires|>
+  bind_rows(questionnaires_after_followup)|>
+  group_by(id)|>
+  tidyr::fill(
+    attendance:ifn_gamma_siddiqi_geomean
+  )|>ungroup()
+
+
+View(questionnaires2)
+
 
 ```
 
 ### Compute FSS composite scores:
 
 ```{r}
-questionnaires.data <- questionnaires %>% mutate(
-  fatigue.mean = rowMeans(select(questionnaires, c(
-    "fss_motivation",
-    "fss_motion",
-    "fss_let_traet",
-    "fss_begraens",
-    "fss_problemer",
-    "fss_laengerevarende_aktivitet",
-    "fss_pligter_og_ansvar",
-    "fss_funktionsindkraenkning",
-    "fss_arbejde_familie_fritid")),
-    na.rm=T))%>%filter(!is.na(fatigue.mean))
+questionnaires.data <- 
+  questionnaires2 %>%
+  ungroup()|> 
+  mutate(
+  fatigue.mean = 
+    rowMeans(select(
+        questionnaires2, 
+        starts_with("fss")), 
+      na.rm = TRUE),
+  treat = case_when(is.na(treat)~treatment,
+                    T ~ treat))
+   
 ```
 
 ### Create SF-36 composites
@@ -568,10 +761,13 @@ Code taken from my own code in RABEX using this guide:
 https://www.rand.org/health-care/surveys_tools/mos/36-item-short-form/scoring.html https://github.com/dgrisafe/R-SF-36/blob/master/SF-36%20Scoring.Rmd
 
 ```{r}
-SF_36<-questionnaires.data %>% select(id,timepoint, treatment,52:87)
+SF_36<-questionnaires.data |>
+  select(id,timepoint, treatment,sf_36_1:sf_36_11_d)
 
-colnames(SF_36)[4:39] <- str_replace(string=colnames(SF_36)[4:39], pattern = "_36_", replacement = "_")
-SF_36[4:39]<-sapply(SF_36[4:39],as.numeric)
+colnames(SF_36)[4:39] <- 
+  str_replace(string=colnames(SF_36)[4:39], pattern = "_36_", replacement = "_")
+
+#SF_36[4:39]<-sapply(SF_36[4:39],as.numeric) #I fixed this further up so I dont need to do it here, also, it's probably better to mutate(across())
 
 SF_36_recoded<-SF_36%>% #Weighing columns according to https://www.rand.org/health-care/surveys_tools/mos/36-item-short-form/scoring.html
   mutate(across( # 5 Point reverse
@@ -621,10 +817,9 @@ SF_36_recoded<-SF_36%>% #Weighing columns according to https://www.rand.org/heal
                         sf_11_a, #33 på RAND
                         sf_11_c #35 på RAND
                         ) 
-                  ,~(.-1)*100/4))
-
+                  ,~(.-1)*100/4))%>%
 #Establish Domains
-SF_36_recoded <-SF_36_recoded %>% group_by(id,timepoint)%>%mutate(
+group_by(id,timepoint)%>%mutate(
   physical_function = mean(c(             sf_3_a,
                                           sf_3_b,
                                           sf_3_c,
@@ -734,9 +929,12 @@ SF.36.Zscores <- SF_36_recoded%>%select(id,timepoint,
                       )
 
 
-SF_36_recoded<-SF.36.Zscores %>% select(id,timepoint,physical.component.score,mental.component.score) %>% merge(SF_36_recoded)
+SF_36_component_scores <- SF.36.Zscores %>% 
+  select(id,timepoint,physical.component.score,mental.component.score)
 
-SF_36_aggregates <- SF_36_recoded %>% select(id, timepoint, 
+SF_36_recoded2<-SF_36_recoded %>% left_join(SF_36_component_scores, join_by(id, timepoint))
+
+SF_36_aggregates <- SF_36_recoded2 %>% select(id, timepoint, 
                                              physical.component.score, mental.component.score,
                                              physical_function, role_limitations_physical_health,
                                              role_limitations_emotional_health, energy_fatigue,
@@ -745,7 +943,8 @@ SF_36_aggregates <- SF_36_recoded %>% select(id, timepoint,
                                              pain,
                                              general_health)
 
-questionnaires.data.SF_36<-left_join(questionnaires.data,SF_36_aggregates,by=c("id","timepoint"))%>%
+questionnaires.data.SF_36<-
+  left_join(questionnaires.data,SF_36_aggregates,by=join_by("id","timepoint"))%>%
   relocate(id, timepoint, treatment,
            fatigue.mean,
            m_1_2,
@@ -759,7 +958,9 @@ questionnaires.data.SF_36<-left_join(questionnaires.data,SF_36_aggregates,by=c("
 We are using the method suggested by Svennungson et al. from this paper: https://lupus.bmj.com/content/8/1/e000471.long
 
 ```{r}
-questionnaires.combined.data<-questionnaires.data.SF_36%>%mutate(
+questionnaires.combined.data<-
+  questionnaires.data.SF_36%>%
+  mutate(
   qslaq_score = 
     vægttab_uden_du_har_forsøgt_det +
     case_when(is.na(slaq_traethed)~0,
@@ -837,15 +1038,15 @@ questionnaires.combined.data<-questionnaires.data.SF_36%>%mutate(
 
 ```{r}
 questionnaires.combined.data%>%write_xlsx(path = here("Output",paste0(
-                       "Questionnaires_combined",
-                       ifelse(mITT,"_mITT",""),ifelse(PP,"_PP",""),
-                       ".xlsx")))
+                       "Questionnaires_combined.xlsx")))
 ```
 
 # SLICC Criteria
 
 ```{r}
-SLICC.data <- anamnese_og_objektiv_undersøgelse_baseline_followup.mITT.data %>% dplyr::select(id, baseline_eller_followup, task_name,
+
+SLICC.data <- `anamnese_og_objektiv_undersøgelse_baseline_followup.data` |>
+  dplyr::select(id, baseline_eller_followup, task_name,
     slicc_feber, slicc_mucokutan, slicc_artrit, slicc_neurology, slicc_serositis, slicc_hematology, slicc_nefrologisk,
     slicc_antiphospholipids,  slicc_complement, slicc_sle_specific_antibodies)%>%filter(
       baseline_eller_followup == 0
@@ -1066,15 +1267,13 @@ SLICC.data <- anamnese_og_objektiv_undersøgelse_baseline_followup.mITT.data %>%
 
 write_xlsx(SLICC.data,
            path = here("Output", paste0(
-                       "SLICC_data",
-                       ifelse(mITT,"_mITT",""),ifelse(PP,"_PP",""),
-                       ".xlsx")))
+                       "SLICC_data.xlsx")))
 ```
 
 # SLEDAI
 
 ```{r}
-SLEDAI.data <- `_j_selena_sledai_score_sri_.mITT.data` %>% dplyr::select(
+SLEDAI.data <- `_j_selena_sledai_score_sri_.data` %>% dplyr::select(
   id, treatment, task_name,
   vas_sledai_physician, 
   kramper_sledai:sledai_leukopeni
@@ -1120,7 +1319,7 @@ SLEDAI.data <- `_j_selena_sledai_score_sri_.mITT.data` %>% dplyr::select(
 
 #write it to a file to be accessed again by the script assessing models for VO2max
 write_xlsx(x=SLEDAI.data, 
-           path = here("Data",paste0("SLEDAI.data", ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),".xlsx")))
+           path = here("Data",paste0("SLEDAI.data.xlsx")))
 
 ```
 
@@ -1134,18 +1333,22 @@ library(lubridate)
 if(fullaccess){
 
 #Date for baseline blood samples can be accessed from the OGTT data which has the date of when the blood samples were taken.
-temp <- `_f_visit__oral_glucose_tolerance_test_ogtt_baseline.mITT.data` %>% dplyr::select(id, dato_ogtt,task_name)
 
-Bloodsamples.data <- `_i_visit__blodprøver_og_urinstix_baseline.mITT.data` %>% 
+  temp <- 
+    `_f_visit__oral_glucose_tolerance_test_ogtt_baseline.data` %>% 
+  dplyr::select(id, dato_ogtt,task_name)
+
+Bloodsamples.data<-
+  `_i_visit__blodprøver_og_urinstix_baseline.data`%>% 
   #separate(
   #  col = task_start,
   #  into = c( "date" , "time"),
   #  sep = " "
   #)%>% ### THIS CODE IS DEPRECATED - At first I tried to find the dates on task_start, but the operator might have accessed some part of the task earlier or later, so Instead I find the dates input into the system.
   left_join(temp, 
-                                                     by = c("id","task_name"))%>%rename(
-                                                       
-                                                       date = dato_ogtt
+            by = c("id","task_name"))%>%
+  rename(
+    date = dato_ogtt
 )%>%
   mutate(
     date = ymd(date),
@@ -1158,7 +1361,8 @@ Bloodsamples.data <- `_i_visit__blodprøver_og_urinstix_baseline.mITT.data` %>%
   ) 
 
 
-Acute_exercise.data <- `_b_visit__acute_exercise_bout_og__x_.mITT.data` %>% 
+
+Acute_exercise.data <- `_b_visit__acute_exercise_bout_og__x_.data` %>% 
   #dplyr::select(
   #id, treatment, sex, 
   #task_name, task_start, dato_acute_exercise_bout)%>%
@@ -1183,7 +1387,7 @@ Bloodsamples.metadata<-Bloodsamples.data %>% dplyr::select(
 
 Bloodsamples.values <- read_excel(path=here("Data", 
                                             "Blood Samples",
-                                            "All Data 2024-07-05.xlsx"))
+                                            "All Data 2024-09-16.xlsx"))
 
 colnames(Bloodsamples.values)<- to_snake_case(colnames(Bloodsamples.values))
 
@@ -1208,10 +1412,9 @@ Bloodsamples.combined.data <-
     .keep = "unused"
   )
    
-#To check the data I'm about to throw out, I run this:
+#To check the data Im about to throw out, I run this:
 Bloodsamples.combined.data.NA.timepoint <- Bloodsamples.combined.data%>%filter(
-  is.na(timepoint)
-)#%>%distinct(date, .keep_all = T)
+  is.na(timepoint))#%>%distinct(date, .keep_all = T)
 
 #Seems reasonable, this data is not related to the study, but came into the blood-samples dataset from patient visits that were close to my dates. It's great to know that I can find PET-CT dates from this dataset. Also ID = Lup006 who I had to exclude because her blood samples showed her to have a SLEDAI > 10 post randomization.
 
@@ -1235,10 +1438,22 @@ Bloodsamples.combined.data2<-
 
 #write it to a file to be accessed again by the script assessing models for Blood Samples
 write_xlsx(x=Bloodsamples.combined.data2, 
-           path = here("Data",paste0("Bloodsamples.data", ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),".xlsx")))
+           path = here("Data","Bloodsamples.data.xlsx"))
 
 #TODO put the average of multiple values in each cell in.
 #We probably need a nested for loop iterating over all the cells in the frame to do this
+
+Bloodsample.wide <- 
+  Bloodsamples.combined.data2%>%
+  pivot_wider(
+  id_cols=c(id, timepoint, date, tidspunkt, time, time_from_t0, order_within_day),
+  names_from = var,
+  values_from = value#,
+  #values_fn = ~ ifelse(is.nan(mean(as.numeric(.x), na.rm=T)), 
+   #                    .x, 
+    #                   mean(as.numeric(.x), na.rm = TRUE))
+  )
+  
 } 
 #
 ```
@@ -1266,26 +1481,17 @@ Bloodsample.wide2[row, bloodsample] <-
 colnames(Bloodsample.wide2)<-colnames(Bloodsample.wide)
 
 write_xlsx(x=Bloodsample.wide2, 
-           path = here("Data",
-                       paste0("Bloodsamples.data.wide", 
-                              ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),
-                              ".xlsx")))
+           path = here("Data","Bloodsamples.data.wide.xlsx"))
 end_time <- Sys.time()
 end_time - start_time
-rm(start_time, end_time)}
 ```
 
-##Bloodsamples without nested lists and all that jazz
+##Bloodsamples let's just load the output from that loop:
 
 ```{r}
 if(fullaccess){
-Bloodsamples<-read_excel(path = here("Data",
-                       paste0("Bloodsamples.data.wide", 
-                              ifelse(mITT, "_mITT", ifelse(PP,"_PP","")),
-                              ".xlsx"))) 
-
-
-Bloodsamples<-Bloodsamples%>%mutate(
+Bloodsample.wide<-read_excel(path = here("Data",
+                       "Bloodsamples.data.wide.xlsx"))%>%mutate(
   timepoint_during_day = case_when(
     grepl("acute bout",timepoint) ~ "Acute Bout",
     T ~
@@ -1301,7 +1507,9 @@ Bloodsamples<-Bloodsamples%>%mutate(
   )
 )
 
-Bloodsample.wide.no.OGTTorAcute <- Bloodsamples %>% 
+#TODO change this, the acute bout needs to be updated so the t0 is clearly t-5 and the t1 is t0.
+
+Bloodsample.wide.no.OGTTorAcute <- Bloodsample.wide %>% 
   filter(timepoint == "baseline"|timepoint=="followup")%>%filter(order_within_day==1)%>% 
        unnest(cols = order_within_day:timepoint_during_day)  %>%
        type.convert(as.is = TRUE) %>%
@@ -1309,13 +1517,36 @@ Bloodsample.wide.no.OGTTorAcute <- Bloodsamples %>%
 #TODO find out why there are so many missing values
 
   
-Bloodsample.wide <- Bloodsamples#%>%pivot_wider(
-  #id_cols=c(id, timepoint, date, tidspunkt, time, time_from_t0, order_within_day),
-  #names_from = var,
-  #values_from = value
-#)
 
+#The lab wants a list of all blood sample timepoints.
+for_lab<-Bloodsamples.combined.data2|>
+  dplyr::select(id,	date,	tidspunkt,	timepoint,	order_within_day)|>
+  rename(id_old = id)|>
+  mutate(id = paste0(id_old, 
+                     case_when(timepoint == "baseline" ~ "a",
+                               timepoint == "baseline - acute bout" ~ "a",
+                                          T  ~ "b")),
+         to_keep = case_when(
+           timepoint == "baseline" & order_within_day >1 ~ F,
+           timepoint == "followup" & order_within_day >1 ~ F,
+           T ~ T
+         ))|>
+  dplyr::filter(to_keep)|>
+  dplyr::select(-to_keep)|>
+  dplyr::group_by(id, timepoint)|>
+  dplyr::distinct(order_within_day, .keep_all = T)|>
+  dplyr::relocate(id, date, tidspunkt, timepoint)
 
+write_xlsx(x=for_lab,
+           path = here("data","for_lab","bloodsamples_for_lene.xlsx"))
+
+for_lab_counts <- for_lab |>
+             group_by(id, timepoint) |>
+             filter(order_within_day == max(order_within_day)) |>
+             rename(number_bloodsamples = order_within_day)
+
+write_xlsx(x=for_lab_counts,
+           path = here("data","for_lab","count_bloodsamples_for_lene.xlsx"))
 #Okay so this doesn't work because it was nested vectors. Sigh. I have to take the average of each element.
 #Bloodsample.wide%>%ggplot(aes(y=as.numeric(`Glukose;P`), x = as.numeric(time_from_t0)))+geom_point()
   #mutate(is_OGTT = case_when(n() > 1  & var %in% c("Glukose;P",
@@ -1398,6 +1629,8 @@ ListContacted<-read_excel(path=here("Data/ContactedList.xlsx"))%>%
   left_join(group)
 #TODO add that one was excluded due to SLEDAI > 10
 
+
+
 #consorttestdata<-data(dispos.data)
 
 data.consort<-data.frame(
@@ -1440,12 +1673,63 @@ g <- consort_plot(data = data.consort,
 plot(g)
 g
 
-ggplot2::ggsave(filename = here("output/graphics/consort_diagram.jpg"), 
+ggplot2::ggsave(filename = here("output","graphics","consort_diagram.jpg"), 
                 plot   = build_grid(g), 
                 width  = 180, 
                 height = 180,
                 units = "mm",
                 dpi = 300)
+
+if(PP){
+  
+  #TODO clear this up so it clearly shows the participants who were excluded due to no exercising per protocol
+  ListContacted_PP<-ListContacted|>
+  left_join(PP_list)|>filter(PP)
+  
+  data.consort<-data.frame(
+  trialno = ListContacted_PP$Screeningnr,
+  induction = ListContacted_PP$id,
+  exclusion = ListContacted_PP$`Reason for decline`,
+  arm = ListContacted_PP$treatment,
+  sbujid_dosed = ListContacted_PP$sbujid_dosed,
+  subjid_notdosed = ListContacted_PP$subjid_notdosed,
+  followup = ListContacted_PP$followup,
+  lost_followup = ListContacted_PP$lost_followup,
+  assessed = ListContacted_PP$followup,
+  no_value = ListContacted_PP$lost_followup,
+  mitt = ListContacted_PP$sbujid_dosed
+)
+
+
+cons_PP <- consort_plot(data = data.consort,
+                  orders = c(trialno = "SLE Patients contacted",
+                             exclusion    = "Excluded/Could not participate",
+                             induction   = "Baseline Measurements",
+                             
+                             arm     = "Randomized",
+                             subjid_notdosed = "Did not begin intervention",
+                             mitt = "Included in the mITT",
+                             lost_followup = "Did not complete intervention",
+                             followup = "Completed Followup"
+                             ),
+                  side_box = c("exclusion", 
+                               "subjid_notdosed",
+                               "lost_followup"),
+                  allocation = "arm",
+                  labels = c("1" = "Assessed in Outpatient Clinic", 
+                             "2" = "Screening and Baseline Assessments",
+                             "3" = "Randomization", 
+                             "5" = "End of study"),
+                  cex = 0.6) 
+plot(cons_PP)
+
+ggplot2::ggsave(filename = here("output","graphics","consort_diagram_PP.jpg"), 
+                plot   = build_grid(cons_PP), 
+                width  = 180, 
+                height = 180,
+                units = "mm",
+                dpi = 300)
+}
  
 ```
 
@@ -1616,7 +1900,7 @@ table1.SLEDAI.data <- SLEDAI.data %>% dplyr::select(
 table1.SLICC.data <- SLICC.data %>% dplyr::select(
   id, slicc_score:slicc_antismith ) %>% mutate(timepoint = "baseline")
 
-table1.kidney <- Bloodsamples %>%
+table1.kidney <- Bloodsample.wide %>%
   filter(timepoint == "baseline" | timepoint == "followup")%>%
   filter(order_within_day == "1")%>%
   dplyr::select(id, timepoint, `Kreatinin;P`, `eGFR / 1,73m² (CKD-EPI)`)%>%
@@ -1632,7 +1916,7 @@ table1.kidney <- Bloodsamples %>%
           by=c("id","timepoint")
          )
 
-table1.dexa<- `_c_visit__anthropometrics_and_dxa.mITT.data` %>% 
+table1.dexa<- `_c_visit__anthropometrics_and_dxa.data` %>% 
   dplyr::select(id, sex, task_name, dato_dxa, 
                 total_fat, total_fat_001, 
                 android_fat_mass_g, android_fat_mass_g_001,
@@ -1668,14 +1952,13 @@ table1.activity.measures <-
                 duration_daily_MVPA_pla, dur_day_total_MOD_min_pla,
                 dur_day_total_VIG_min_pla)
 
-table1.other.anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.",
-                                         ifelse(mITT,"mITT",
-                                          ifelse(PP, "PP","")),".data .xlsx")))%>%
+table1.other.anthropometric.medicalhistory <- 
+  read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   "anamnese_og_objektiv_undersøgelse_baseline_followup.data .xlsx"))%>%
   mutate(timepoint=case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
     task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
      grepl("Baseline",task_name) ~ "baseline"))%>%
-  dplyr::select(id, treatment,sex,timepoint, mITT, PP, 
+  dplyr::select(id, treatment,sex,timepoint, mITT, 
                 højde, weight, taljeomkreds, 
                 hvilepuls,
                 etnisk_oprindelse, etnicitet_anden, 
@@ -1717,6 +2000,8 @@ table1.other.anthropometric.medicalhistory <- read_excel(path=here("Data/easy_tr
 
 table1.other.anthropometric.medicalhistory2<-
   table1.other.anthropometric.medicalhistory%>%
+  dplyr::filter(
+    mITT == 1)%>%
   group_by(id)%>%
   mutate( #dummy code out pharmaceutical treatments
     prednisolone_dose = #TODO opdater data så vi også finder den der var indskrevet som "predmisolon"
@@ -1948,7 +2233,7 @@ table1.other.anthropometric.medicalhistory2<-
       T ~ T),
     )
 
-#write_xlsx(table1.other.anthropometric.medicalhistory2, path = here("Data","table1.other.anthropometric.pharma_done.xlsx"))
+write_xlsx(table1.other.anthropometric.medicalhistory2, path = here("Data","table1.other.anthropometric.pharma_done.xlsx"))
 
 #table1.other.anthropometric.medicalhistory2%>%select(
 #  id, timepoint, medicin_ændringer_siden_baseline, tnf_blocker_dose,
@@ -1958,7 +2243,7 @@ table1.other.anthropometric.medicalhistory2<-
 
 #View(table1.other.anthropometric.medicalhistory2)
 
-screening.waist.weight <- `_c_visit__samtykke_inklusion_eksklusionskriterier_baseline_fysisk_aktivitet.mITT.data`%>%dplyr::select(
+screening.waist.weight <- `_c_visit__samtykke_inklusion_eksklusionskriterier_baseline_fysisk_aktivitet.data`%>%dplyr::select(
   id,
   taljemål_måles,
   hvilepuls,
@@ -1978,7 +2263,7 @@ table1.other.anthropometric.medicalhistory <-
   waist_height_ratio = (waist_circumference/height),
   bmi = weight/((height/100)^2)
   )%>%dplyr::select(-c(
-    sex, mITT, PP, treatment
+    sex, mITT, treatment
   ))
 
 table1.dietary.intake <- read_excel(path = here("Data","DietaryReports.xlsx"))%>%mutate(
@@ -2050,7 +2335,11 @@ table1.age <- read_excel(
   age <- NA_real_
   table1.age <- data.frame(id=table1.vo2max.combined$id, age)
 }
-table1.vo2max.combined<-table1.vo2max.combined %>%left_join(table1.age)%>%relocate(id, mITT, timepoint, treatment, age)
+table1.vo2max.combined<-
+  table1.vo2max.combined %>%
+  left_join(table1.age)%>%
+  relocate(id, mITT, timepoint, treatment, age)|>
+  filter(mITT == 1)
   
 ```
 
@@ -2078,12 +2367,14 @@ data.table1 <- table1.vo2max.combined %>% left_join(
            )%>%left_join( 
   table1.other.anthropometric.medicalhistory, by=c("id","timepoint"), keep =F
            )%>%
+  left_join(PP_list)%>%
   mutate(timepoint = factor(timepoint,levels = c("screening", "baseline", "followup")))%>%
   relocate(
   id, timepoint, treatment, sex, aerobic_capacity, FSS) %>%
   group_by(id)%>%mutate(
     sex = factor(sex, levels =c("F","M"), labels = c("Female","Male")))
     #TODO create this dataset
+
 ```
 
 ##Set labels & units for table 1
@@ -2248,12 +2539,121 @@ label(data.table1$duration_daily_MVPA_pla) <- "Time in MVPA per day"
 units(data.table1$duration_daily_MVPA_pla) <- "Minutes"
 ```
 
+## Decide whether to use the quality-controlled VO2max tests
+
+```{r}
+QC = T
+CS = F
+Poole = F
+MLA = F
+Easytrial = T
+if(QC){
+if(sum(c(CS,Poole,MLA,Easytrial), na.rm=T)>2){
+  warning("Only select one of CS, Poole, MLA or Easytrial, DEFAULTING TO EASYTRIAL") 
+  CS = F
+  Poole = F
+  MLA = F
+  Easytrial = T
+  }}
+
+if(QC){
+ data_vo2max_QC <- read_excel(
+   path = here("Output","VO2maxQC","Data.VO2MAXQC.xlsx"))|>
+   mutate(height_at_vo2max = height, weight_at_vo2max = weight, .keep = "unused")
+ 
+  data.table1.QC<-data.table1 %>% left_join(data_vo2max_QC, by = join_by(id, timepoint))
+  
+  if(Easytrial){
+  data.table1<-  data.table1.QC %>% mutate(
+    aerobic_capacity = case_when(
+      easytrialQualityTest == T ~ aerobic_capacity,
+      T ~ NA_real_
+    ),
+    vo_2_max = case_when(
+      easytrialQualityTest == T~ vo_2_max,
+      T ~ NA_real_
+    ),
+    hrmax = case_when(
+      easytrialQualityTest == T~ hrmax,
+      T ~ NA_real_
+    )
+  )  
+  }
+  if(MLA){
+    data.table1<-  data.table1.QC %>% mutate(
+    aerobic_capacity = case_when(
+      QualityMeasurementMLA ~ aerobic_capacity,
+      T ~ NA_real_
+    ),
+    vo_2_max = case_when(
+      QualityMeasurementMLA ~ vo_2_max,
+      T ~ NA_real_
+    ),
+    hrmax = case_when(
+      QualityMeasurementMLA ~ hrmax,
+      T ~ NA_real_
+    )
+  )
+  }
+  if(CS){
+    data.table1<-  data.table1.QC %>% mutate(
+    aerobic_capacity = case_when(
+      QualityMeasurementCS ~ aerobic_capacity,
+      T ~ NA_real_
+    ),
+    vo_2_max = case_when(
+      QualityMeasurementCS ~ vo_2_max,
+      T ~ NA_real_
+    ),
+    hrmax = case_when(
+      QualityMeasurementCS ~ hrmax,
+      T ~ NA_real_
+    )
+  )
+  }
+  if(Poole){
+    data_vo2max_QC <- read_excel(
+   path = here("Output","VO2maxQC","Data.VO2MAXQC_poole.xlsx")|>
+   mutate(height_at_vo2max = height, weight_at_vo2max = weight, .keep = "unused")
+)
+  data.table1.QC<-data.table1 %>% left_join(data_vo2max_QC, by = join_by(id, timepoint))
+    
+    data.table1<-  data.table1.QC %>% mutate(
+    aerobic_capacity = case_when(
+      QualityMeasurementCS ~ aerobic_capacity,
+      T ~ NA_real_
+    ),
+    vo_2_max = case_when(
+      QualityMeasurementCS ~ vo_2_max,
+      T ~ NA_real_
+    ),
+    hrmax = case_when(
+      QualityMeasurementCS ~ hrmax,
+      T ~ NA_real_
+    )
+  )
+  }
+  
+}
+```
+
 ## Pivot dataset wider to ready for table 1
 
 ```{r}
+
+
 library(lubridate)
 data.table1.wide <- data.table1 %>% pivot_wider(
-  id_cols=c(id, treatment, sex, mITT, age,  #etnisk_oprindelse,etnicitet_anden,
+  id_cols=c(id, treatment, sex, mITT, age,  
+            #etnisk_oprindelse,etnicitet_anden,
+            PP, attendance, 
+            attendance_sufficient, 
+            unsuccesful_exercise, 
+            successful_exercise, 
+            unknown_exercise_effect,
+            succesful_HIIT,
+            succes_percentage, 
+            protocol_violator,
             m_1_2_quantile_at_baseline, 
             m_3_4_quantile_at_baseline,         
             m_5_12_quantile_at_baseline, 
@@ -2293,18 +2693,6 @@ data.table1.wide<-data.table1.wide%>%
     SLE_Duration_Months = 12*SLE_Duration_Years,
     .keep = "all")
 
-#View(data.table1.wide)
-
-#table1.LMMstar.Sum<-data.table1 %>% filter (timepoint != "followup")%>%LMMstar::summarize(formula = 
-#            aerobic_capacity + FSS + sex ~ timepoint + treatment,
-#            data=.,
-#            digits = 1,
-#            na.rm = T)%>%mutate(
-#              count = round(mean*observed,0),
-#              percent_missing = pc.missing *100)%>%mutate(
-#                across(where(is.numeric), ~ round(.x, digits = 2)))
-
-## I tested out the LMMstar summarize for making table 1, I think I could have used it, but I do think I should prefer table1 because It's easier to convert to a flextable.
 
 
 ```
@@ -2401,6 +2789,10 @@ label(data.table1.wide$ethnicity_baseline) <- "Ethnicity"
 ## Create Table 1 Using table 1 package
 
 ```{r}
+if(PP){
+  data.table1.wide.ppvsviolator <- data.table1.wide
+  data.table1.wide <- data.table1.wide|>filter(PP)
+}
 
 
 #my.render.cont <- function(x) {
@@ -2452,7 +2844,7 @@ list_normal_dist <- c(
   "hemoglobin_baseline", "thrombocytes_baseline", "Beta2_microglobuline_baseline",
                       "aerobic_capacity_change_from_screening",
                       "aerobic_capacity_change_from_baseline",
-  "Energy_kJ_mean_baseline", "Energy_intake_change")
+  "Energy_kJ_mean_baseline", "Energy_intake_change", "m_1_2_baseline", "m_3_4_baseline", "m_5_12_baseline")
 #non_cont_variables <- c("age")
 
 t1a<-data.table1.wide%>%table1(x= ~ 
@@ -2493,10 +2885,19 @@ t1a<-data.table1.wide%>%table1(x= ~
 t1.a.flex<-t1flex(t1a)
 
 
-t1.a.flex%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table1",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
+t1.a.flex%>%
+  save_as_docx( values = NULL, 
+      path=here("Output","Tables",
+                paste0(
+                  "table1",
+                  ifelse(mITT,"_mITT",
+                         ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                                      ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
 
@@ -2526,8 +2927,8 @@ rndr.abbreviated <- function(x, name, ...) {
     if (!is.numeric(x)) return(render.categorical.default(x))
   what <-
     case_when(
-   name %in% list_normal_dist ~ c("Mean (SD) \n missing: NMISS"),
-   T ~ c("Median [Q1, Q3] \n missing: NMISS"))
+   name %in% list_normal_dist ~ c("Mean (SD)"),
+   T ~ c("Median [Q1, Q3]"))
   parse.abbrev.render.code(what)(x)
 }
 
@@ -2598,9 +2999,16 @@ abbr.text <- c("Table 1", table.text)
 t1a.abbr.flex <- t1flex(t1a.abbr)%>%add_footer_lines(
  values = abbr.text
 )
-t1a.abbr.flex%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table1.abbreviated",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+t1a.abbr.flex%>%save_as_docx( values = NULL, 
+        path=here("Output","Tables",
+                  paste0(
+                    "table1.abbreviated",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
                                                      ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
@@ -2659,10 +3067,16 @@ t1a.m12elevated.abbr<-data.table1.wide%>%filter(!is.na(m_1_2_elevated))%>%
 
 t1a.m12elevated.abbr <- t1flex(t1a.m12elevated.abbr)%>%add_footer_lines(
  values = c("Table 1", table.text))
-t1a.m12elevated.abbr%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table1_abbreviated_stratified_m12",
-                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+t1a.m12elevated.abbr%>%save_as_docx( values = NULL, 
+    path=here("Output","Tables",
+              paste0(
+                "table1_abbreviated_stratified_m12",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
                                                      ".docx"
                                                    )
                                                    ), pr_section = 
@@ -2683,9 +3097,16 @@ t1.medication<-data.table1.wide%>%table1(x= ~
               render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t1.medication)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table1_medication",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+t1flex(t1.medication)%>%save_as_docx( values = NULL,
+            path=here("Output","Tables",
+                      paste0(
+                        "table1_medication",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
                                                      ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
@@ -2733,10 +3154,17 @@ t1.slicc.criteria <- data.table1.wide%>%table1(x = ~
               #render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t1.slicc.criteria)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table1_slicc",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
+t1flex(t1.slicc.criteria)%>%save_as_docx( values = NULL, 
+      path=here("Output","Tables",
+                paste0(
+                  "table1_slicc",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                  ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
 
@@ -2756,9 +3184,17 @@ t1.blood.samples <- data.table1.wide%>%table1(x = ~
               render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t1.blood.samples)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table1_bloodsamples",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+t1flex(t1.blood.samples)%>%
+  save_as_docx( values = NULL, 
+                path=here("Output","Tables",
+                          paste0(
+                            "table1_bloodsamples",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
                                                      ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
@@ -2830,6 +3266,80 @@ t1flex(t1.strat.quant.m.1.2)
 
 #variables_table1 <- read_excel(here("Input","Variables_for_table1.xlsx"), header=T)
 
+##Per Protocol Table 1 objects, Violators vs non-violators
+
+
+```
+
+## Per Protocol Violators vs non-violators
+
+```{r}
+if(PP){
+  data.table1.wide.ppvsviolator<-
+    data.table1.wide.ppvsviolator|>
+    filter(!is.na(PP))|>
+    mutate(
+    PP_char = case_when(PP ~ "Followed protocol",
+                         !PP ~ "Did not follow protocol",
+                         T~NA_character_)
+  )
+  
+  t1a.abbr.ProtocolVsViolators<-
+    table1(x= ~ 
+               sex +
+                 ethnicity_baseline+
+              age +
+              weight_baseline+
+              waist_height_ratio_baseline_2+
+              bmi_baseline+
+              SLE_Duration_Months+
+              SLEDAI_score_baseline+
+              slicc_score_baseline+
+              aerobic_capacity_screening +
+                hrmax_screening+
+                borg_skala_efter_test_screening+
+                watt_max_screening+
+              aerobic_capacity_baseline +
+                hrmax_baseline+
+                borg_skala_efter_test_baseline+
+                watt_max_baseline+
+              FSS_baseline +
+                vas_fatigue_baseline+
+                sla_qvas_baseline+
+                vas_sledai_physician_baseline+
+              sf36_physical.component.score_baseline+
+              sf36_mental.component.score_baseline+
+              duration_daily_MVPA_pla_baseline+
+              Energy_kJ_mean_baseline+
+                fat_g_mean_baseline+
+                carbohydrate_g_mean_baseline+
+                protein_g_mean_baseline+
+              total_fat_percentage_baseline+
+                total_fat_kg_baseline+
+                android_fat_mass_kg_baseline+
+                gynoid_fat_mass_kg_baseline+
+                total_muscle_mass_kg_baseline+
+              m_1_2_baseline+
+              m_3_4_baseline+
+              m_5_12_baseline+
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+                hemoglobin_baseline+
+                thrombocytes_baseline+
+                eGFR_baseline+
+              beta2_microglobuline_baseline|
+              treatment+PP_char,
+              render=rndr.abbreviated,
+              #render.continuous = "Mean (SD)",
+              #render.categorical = ,
+            #render.missing = T,
+            data = data.table1.wide.ppvsviolator)
+
+}
 ```
 
 # Table 2 - change scores
@@ -2903,10 +3413,18 @@ t2a<-data.table1.wide%>%table1(x= ~
               #render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t2a)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table2",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
+t1flex(t2a)%>%
+  save_as_docx( values = NULL, 
+                path=here("Output","Tables",
+                          paste0(
+                            "table2",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                  ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
 
@@ -2928,13 +3446,19 @@ t2a.m12.quantile<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_baseline))%
               #render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t2a.m12.quantile)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table2_stratified_m12quants",
-                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
-                                                   )
-                                                   ), pr_section = 
+t1flex(t2a.m12.quantile)%>%
+  save_as_docx( values = NULL, 
+                path=here("Output","Tables",
+                          paste0(
+                            "table2_stratified_m12quants",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                  ".docx" )), 
+                pr_section = 
                                        officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
 
 t2a.elevated<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_baseline))%>%table1(x=~ 
@@ -2955,14 +3479,24 @@ t2a.elevated<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_baseline))%>%ta
               #render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t2a.elevated)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table2_stratified_m12elevation",
-                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
-                                                   )
-                                                   ), pr_section = 
-                                       officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
+t1flex(t2a.elevated)%>%
+  save_as_docx( values = NULL, 
+                path=here("Output","Tables",
+                          paste0(
+                            "table2_stratified_m12elevation",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                                                     ".docx")
+                                                   ), 
+                pr_section = 
+                  officer::prop_section(
+                    page_size(orient="landscape"),
+                    type="continuous"), 
+                align = "center")
 
 
 t2a.abbreviated<-data.table1.wide%>%table1(x= ~ 
@@ -2985,10 +3519,18 @@ t2a.abbreviated<-data.table1.wide%>%table1(x= ~
               #render.categorical = my.render.cat,
             #render.missing = T,
             data = .)
-t1flex(t2a.abbreviated)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table2_abbreviated",ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
+t1flex(t2a.abbreviated)%>%
+  save_as_docx( values = NULL, 
+                path=here("Output","Tables",
+                          paste0(
+                            "table2_abbreviated",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                  ".docx"
                                                    )
                                                    ), pr_section = NULL, align = "center")
 
@@ -3013,14 +3555,82 @@ t2a.elevated.abbreviated<-data.table1.wide%>%filter(!is.na(m_1_2_quantile_at_bas
             #render.missing = T,
             data = .)
 
-t1flex(t2a.elevated.abbreviated)%>%save_as_docx( values = NULL, path=here("Output","Tables",
-                                                   paste0(
-                                                     "table2_abbreviated_m12elevation",
-                                                     ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
-                                                     ".docx"
+t1flex(t2a.elevated.abbreviated)%>%
+  save_as_docx( values = NULL, 
+                path=here("Output","Tables",
+                          paste0(
+                            "table2_abbreviated_m12elevation",
+                  ifelse(mITT,"_mITT",ifelse(PP, "_PP", "")),
+                  ifelse(QC,paste0("_QC",
+                      ifelse(Easytrial, "Easytrial",
+                           ifelse(MLA,"MLA", 
+                                  ifelse(CS,"CS",
+                                         ifelse(Poole,"Poole",""))))),""),
+                  ".docx"
                                                    )
-                                                   ), pr_section = 
-                                       officer::prop_section(page_size(orient="landscape"),                                                                          type="continuous"), align = "center")
+                                                   ), 
+                pr_section = 
+                  officer::prop_section(
+                    page_size(orient="landscape"),
+                    type="continuous"), 
+                align = "center")
+
+```
+
+## Boxplots
+
+```{r}
+data.table1<-
+  data.table1 %>%mutate(timepoint = factor( timepoint, levels = c("screening", "baseline", "followup")),
+                        treat = case_when(
+                          timepoint == "followup" ~ treatment,
+                          T~"Pingvin"
+                        ),
+                        treat_time = case_when(
+                          timepoint == "followup" ~ paste0(treat," at ",timepoint),
+                          T ~ timepoint
+                        ),
+                        treat_time_IFN = paste0(
+                          m_1_2_quantile_at_baseline , " at ",treat_time
+                        ),
+                        treat_time = factor(treat_time, 
+                                            levels = 
+                                              c("screening", 
+                                                "baseline", 
+                                                paste0(treat," at ",timepoint))))
+  
+
+data.table1 |>
+  filter(!is.na(m_1_2_quantile_at_baseline))|>
+  ggplot(
+  aes( y = aerobiccapacity, x = treat_time, fill = m_1_2_quantile_at_baseline)) +
+    geom_boxplot()+
+    geom_point(position = "jitter", aes( colour = m_1_2_quantile_at_baseline))
+
+
+data.table1 |>
+  filter(!is.na(m_1_2_quantile_at_baseline))|>
+  ggplot(
+  aes( y = aerobiccapacity, x = treat_time, fill = m_1_2_quantile_at_baseline)) +
+    geom_boxplot()+
+  labs(y = "Aerobic Capacity", x = "Timepoint and Treatment",  fill="IFN-\u03B1 signature at Baseline")
+
+data.table1 |>
+  filter(!is.na(m_1_2_quantile_at_baseline))|>
+  ggplot(
+  aes( y = aerobiccapacity, x = treat_time)) +
+    geom_boxplot()
+
+data.table1 |>
+  filter(!is.na(m_1_2_quantile_at_baseline))|>
+  filter(timepoint != "screening")|>
+  ggplot(
+  aes( y = FSS, x = treat_time, fill = m_1_2_quantile_at_baseline)) +
+    geom_boxplot()+
+  labs(y = "FSS", x = "Timepoint and Treatment",  fill="IFN-\u03B1 signature at Baseline")
+
+
+
 ```
 
 # Data Wrangling for analysis of all genes

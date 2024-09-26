@@ -97,13 +97,26 @@ plot(model1.m_1_2.lmm, type = "scatterplot")
 plot(model1.m_1_2.lmm, type = "qqplot")
 #anova(model1.kondital.lmm)
 effects(model1.m_1_2.lmm, variable = NULL)
+
+#Is IL-6 related signaling dependant on M.1.2 changes
+model2.il6related.m1.2timedependant<-lmm(
+  formula =  il_6_related ~ timepoint+treat:timepoint+timepoint:m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = cytokine.data
+)
+summary(model2.il6related.m1.2timedependant)
+plot(model2.il6related.m1.2timedependant, type = "scatterplot")
+plot(model2.il6related.m1.2timedependant, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model2.il6related.m1.2timedependant, variable = NULL)
 ```
 
 ## Check all the models in a loop
 
 ```{r}
 vector_of_cytokinescores <- colnames(cytokine.data)[3:18]
-
+list.models<-list()
 for (score in vector_of_cytokinescores){
   model1.lmm<-lmm(
   formula = reformulate(
@@ -115,10 +128,137 @@ for (score in vector_of_cytokinescores){
   data = cytokine.data
 )
 summary(model1.lmm)
+list.models[[score]]<-model.tables(model1.lmm)
 plot(model1.lmm, type = "scatterplot")
 plot(model1.lmm, type = "qqplot")
 #anova(model1.kondital.lmm)
 #effects(model1.lmm, variable = NULL)
 }
+```
+
+
+## Wide data for bland Altman plots
+Julie suggested doing bland altman plots on the control group to check for the stability of scores.
+
+```{r}
+cytokine.data.wide<-cytokine.data%>%pivot_wider(
+  id_cols = c(id,treatment, sex, PP, mITT),
+  names_from = timepoint,
+  values_from = m_1_2:tnf_related_geomean
+)
+
+str(cytokine.data.wide)
+
+t.test(cytokine.data.wide$m_1_2_Baseline,cytokine.data.wide$m_1_2_Followup, paired=T)
+t.test(cytokine.data.wide$m_3_4_Baseline,cytokine.data.wide$m_3_4_Followup, paired=T)
+t.test(cytokine.data.wide$m_5_12_Baseline,cytokine.data.wide$m_5_12_Followup, paired=T)
+t.test(cytokine.data.wide$ifn_1_el_sherb_Baseline ,cytokine.data.wide$ifn_1_el_sherb_Followup , paired=T)
+t.test(cytokine.data.wide$ifn_2_el_sherb_Baseline ,cytokine.data.wide$ifn_2_el_sherb_Followup , paired=T)
+t.test(cytokine.data.wide$il_6_related_Baseline   ,cytokine.data.wide$il_6_related_Followup   , paired=T)
+t.test(cytokine.data.wide$tnf_related_Baseline    ,cytokine.data.wide$tnf_related_Followup    , paired=T)
+
+#cytokine.data.wide<-cytokine.data%>%pivot_wider(
+#  id_cols = c(id,treatment, sex, PP, mITT),
+#  names_from = timepoint,
+#  values_from = m_1_2:tnf_related_geomean
+#)%>%filter(treatment=="Pingvin")
+
+#str(cytokine.data.wide)
+
+#t.test(cytokine.data.wide$m_1_2_Baseline,cytokine.data.wide$m_1_2_Followup, paired=T)
+#t.test(cytokine.data.wide$m_3_4_Baseline,cytokine.data.wide$m_3_4_Followup, paired=T)
+#t.test(cytokine.data.wide$m_5_12_Baseline,cytokine.data.wide$m_5_12_Followup, paired=T)
+#t.test(cytokine.data.wide$ifn_1_el_sherb_Baseline ,cytokine.data.wide$ifn_1_el_sherb_Followup , paired=T)
+#t.test(cytokine.data.wide$ifn_2_el_sherb_Baseline ,cytokine.data.wide$ifn_2_el_sherb_Followup , paired=T)
+#t.test(cytokine.data.wide$il_6_related_Baseline   ,cytokine.data.wide$il_6_related_Followup   , paired=T)
+#t.test(cytokine.data.wide$tnf_related_Baseline    ,cytokine.data.wide$tnf_related_Followup    , paired=T)
+
+```
+#Bland Altman plots
+```{r}
+Bland.Altman.m.1.2<- cytokine.data.wide %>%ggplot(aes(x=m_1_2_Baseline,
+                                                      y=m_1_2_Followup,
+                                                      colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+Bland.Altman.m.1.2
+
+Bland.Altman.m.3.4<- cytokine.data.wide %>%ggplot(aes(x=m_3_4_Baseline,
+                                                      y=m_3_4_Followup,
+                                                      colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+Bland.Altman.m.3.4
+
+Bland.Altman.m.5.12<- cytokine.data.wide %>%ggplot(aes(x=m_5_12_Baseline,
+                                                      y=m_5_12_Followup,
+                                                      colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+Bland.Altman.m.5.12
+
+Bland.Altman.ifn1.El.Sherb<- cytokine.data.wide %>%ggplot(aes(x=ifn_1_el_sherb_Baseline,
+                                                      y=ifn_1_el_sherb_Followup,
+                                                      colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+Bland.Altman.ifn1.El.Sherb
+
+Bland.Altman.ifn2.El.Sherb<- cytokine.data.wide %>%ggplot(aes(x=ifn_2_el_sherb_Baseline,
+                                                      y=ifn_2_el_sherb_Followup,
+                                                      colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+Bland.Altman.ifn2.El.Sherb
+lm_ifn2_elsherb<-lm(ifn_2_el_sherb_Followup~ifn_2_el_sherb_Baseline, data = cytokine.data.wide)
+summary(lm_ifn2_elsherb)
+
+Bland.Altman.il6related<- cytokine.data.wide %>%ggplot(aes(x=il_6_related_Baseline,
+                                                      y=il_6_related_Followup,
+                                                      colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+Bland.Altman.il6related
+
+```
+
+#Plot of IL-6 change against M_1_2 at baseline
+
+```{r}
+cytokine.data.wide <- cytokine.data.wide %>%mutate(
+  il_6_change = il_6_related_Followup - il_6_related_Baseline
+)
+il_6_change_against_m_1_2<-cytokine.data.wide %>% 
+  ggplot(aes(
+    x=m_1_2_Baseline, 
+    y=il_6_change, 
+    colour = treatment))+
+  geom_point()+
+  stat_smooth(method="lm")
+
+il_6_change_against_m_1_2
+
+baseM12.df<-cytokine.data.wide%>%select(id, m_1_2_Baseline)
+
+cytokine.data.m12.locked <- cytokine.data %>% left_join(baseM12.df)
+
+model2.il6related.m1.2baseline<-lmm(
+  formula =  il_6_related ~ timepoint+treat:timepoint+m_1_2_Baseline+treat:timepoint:m_1_2_Baseline+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = cytokine.data.m12.locked
+)
+summary(model2.il6related.m1.2baseline)
+plot(model2.il6related.m1.2baseline, type = "scatterplot")
+plot(model2.il6related.m1.2baseline, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model2.il6related.m1.2baseline, variable = NULL)
+plot(model2.il6related.m1.2baseline, type = "partial", color = "treatment")
 ```
 

@@ -114,7 +114,7 @@ sex.data<-sex.data[!duplicated(sex.data), ]
 
 diet_group<-left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%mutate(
   treat = case_when(
-    timepoint == "Baseline" ~ "Pingvin",
+    timepoint == "Baseline" ~ "control",
     timepoint == "Followup" ~ treatment,
     T~ NA_character_
   ))%>%left_join(sex.data, by=join_by(id))%>%relocate(
@@ -246,19 +246,17 @@ plot(model2.alcohol.m12.lmm, type = "qqplot")
 ## Analysis of Body Composition Changes
 
 ```{r}
-treat.data <- read_excel(path =  here("Data","vo2max_mITT.xlsx"))%>%dplyr::select(
+treat.data <- read_excel(path =  here("Data","vo2max.xlsx"))%>%dplyr::select(
                                                         id,sex, treatment
                                                       )
 treat.data<-treat.data[!duplicated(treat.data), ]
 
-anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.",
-                                         ifelse(mITT,"mITT",
-                                          ifelse(PP, "PP","")),".data .xlsx")))%>%
+anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.data .xlsx")))%>%
   mutate(timepoint=case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
     task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
      grepl("Baseline",task_name) ~ "baseline"))%>%
-  dplyr::select(id, treatment,sex,timepoint, mITT, PP, 
+  dplyr::select(id, treatment,sex,timepoint, mITT, 
                 højde, weight, taljeomkreds, 
                 hvilepuls,
                 etnisk_oprindelse, etnicitet_anden, 
@@ -302,8 +300,8 @@ anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_
     WHR = waist_circumference/height,
     bmi=weight/(height/100)^2,
     treat = case_when(
-      timepoint == "baseline" ~ "Pingvin",
-      timepoint == "screeing" ~ "Pingvin",
+      timepoint == "baseline" ~ "control",
+      timepoint == "screeing" ~ "control",
       T~treatment
     )
   )
@@ -311,7 +309,8 @@ anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_
 
 ```
 
-##Model on BMI, WHR and Weight
+## Model on BMI, WHR and Weight
+
 ```{r}
 model1.bmi.lmm<-lmm(
   formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
@@ -324,15 +323,134 @@ plot(model1.bmi.lmm, type = "scatterplot")
 plot(model1.bmi.lmm, type = "qqplot")
 #anova(model1.energy.lmm)
 
-model1.bmi.lmm.m12.lmm<-lmm(
+model2.bmi.lmm.m12.lmm<-lmm(
   formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = anthropometric.medicalhistory
 )
-summary(model1.bmi.lmm.m12.lmm)
-plot(model1.bmi.lmm.m12.lmm, type = "scatterplot")
-plot(model1.bmi.lmm.m12.lmm, type = "qqplot")
+summary(model2.bmi.lmm.m12.lmm)
+plot(model2.bmi.lmm.m12.lmm, type = "scatterplot")
+plot(model2.bmi.lmm.m12.lmm, type = "qqplot")
 #anova(model2.fat.m12.lmm)
+
+model1.WHR.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.WHR.lmm)
+plot(model1.WHR.lmm, type = "scatterplot")
+plot(model1.WHR.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.WHR.lmm.m12.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.WHR.lmm.m12.lmm)
+plot(model2.WHR.lmm.m12.lmm, type = "scatterplot")
+plot(model2.WHR.lmm.m12.lmm, type = "qqplot")
+#anova(model2.fat.m12.lmm)
+
+model1.weight.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.weight.lmm)
+plot(model1.weight.lmm, type = "scatterplot")
+plot(model1.weight.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.weight.lmm.m12.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.weight.lmm.m12.lmm)
+plot(model2.weight.lmm.m12.lmm, type = "scatterplot")
+plot(model2.weight.lmm.m12.lmm, type = "qqplot")
+#anova(model2.fat.m12.lmm)
+
 ```
 
+# Export data to RDS objects
+
+```{r}
+
+macronutrients_list <- list(
+  energy_main_lmm =
+    model.tables(model1.energy.lmm),
+  energy_interaction_lmm = 
+    model.tables(model2.energy.m12.lmm),
+  fat_main_lmm = 
+    model.tables(model1.fat.lmm),
+  fat_interaction_lmm = 
+    model.tables(model2.fat.m12.lmm),
+  carb_main_lmm = 
+    model.tables(model1.carb.lmm),
+  carb_interaction_lmm = 
+    model.tables(model2.carb.m12.lmm),
+  protein_main_lmm = 
+    model.tables(model1.protein.lmm),
+  protein_interaction_lmm =
+    model.tables(model2.protein.m12.lmm),
+  alcohol_main_lmm =
+    model.tables(model1.alcohol.lmm),
+  alcohol_interaction_lmm = 
+    model.tables(model2.alcohol.m12.lmm)
+  )
+
+  macronutrients_list|>
+    saveRDS(file = here("Output","LMMlists","macronutrients_list_lmm.rds")) 
+
+
+  anthropometrics_list <- list(
+  bmi_main_lmm =
+    model.tables(model1.bmi.lmm),
+  bmi_interaction_lmm = 
+    model.tables(model2.bmi.lmm.m12.lmm),
+  WHR_main_lmm = 
+    model.tables(model1.WHR.lmm),
+  WHR_interaction_lmm = 
+    model.tables(model2.WHR.lmm.m12.lmm),
+  weight_main_lmm = 
+    model.tables(model1.weight.lmm),
+  weight_interaction_lmm = 
+    model.tables(model2.weight.lmm.m12.lmm)
+  
+  )
+
+  anthropometrics_list|>
+    saveRDS(file = here("Output","LMMlists","anthropometrics_list_lmm.rds")) 
+
+
+
+model1.weight.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.weight.lmm)
+plot(model1.weight.lmm, type = "scatterplot")
+plot(model1.weight.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.weight.lmm.m12.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.weight.lmm.m12.lmm)
+plot(model2.weight.lmm.m12.lmm, type = "scatterplot")
+plot(model2.weight.lmm.m12.lmm, type = "qqplot")
+#anova(model2.fat.m12.lmm)
+```

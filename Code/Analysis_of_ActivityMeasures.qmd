@@ -83,7 +83,7 @@ group_cytokine<-read_excel(path = here("Data","grouping_cytokine.xlsx"))
 
 AX3_group<-AX3_Data.Frame %>%left_join(group_cytokine, by=join_by(id))%>%mutate(
   treat = case_when(
-    timepoint == "baseline" ~ "Pingvin",
+    timepoint == "baseline" ~ "control",
     timepoint == "followup" ~ treatment,
     T~NA_character_
   )
@@ -151,3 +151,17 @@ plot(model2.MVPA.backorthigh.m12.lmm, type = "qqplot")
 
 ```
 
+## Save RDS files of model tables in lists
+
+```{r}
+Activity_lmm_list <- list(
+  MVPA_back_main = model.tables(model1.MVPA.back.lmm),
+  MVPA_back_interaction = model.tables(model2.MVPA.back.m12.lmm),
+  MVPA_backorthigh_main = model.tables(model1.MVPA.backorthigh.lmm),
+  MVPA_backorthigh_interaction = model.tables(model2.MVPA.backorthigh.m12.lmm)
+
+)
+
+saveRDS(object = Activity_lmm_list,
+           file = here("Output","LMMlists","Activity_lmm_list.rds"))
+```

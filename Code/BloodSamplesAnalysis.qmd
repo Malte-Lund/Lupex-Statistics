@@ -1,0 +1,195 @@
+---
+title: "BloodSampleModels"
+format: html
+editor: visual
+---
+
+# Models on blood samples
+
+### Packages
+
+```{r}
+library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+#renv::install("table1")
+library(table1)
+#renv::install("flextable")
+#renv::install("officer")
+library(flextable)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+#renv::install("DescTools")
+library(DescTools)
+
+library(officer)
+library(LMMstar)
+
+mITT = T
+PP = F
+```
+
+## Load Data
+
+```{r}
+Bloodsamples<-read_excel(path = here("Data",
+                       paste0("Bloodsamples.data.wide", 
+                              ifelse(mITT, "_mITT", 
+                                     ifelse(PP,"_PP","")),
+                              ".xlsx"))) 
+```
+
+## Include only baseline and followup measuresments were we have IL-6 or CRP
+
+```{r}
+
+Bloodsamples.il6.crp.BLFU<-Bloodsamples%>% 
+  filter(!is.na(`C-reaktivt protein [HSCRP];P` |`Interleukin-6;P`))%>%
+  filter(!grepl("acute bout",timepoint,))%>%
+  mutate(remove = case_when(
+    id=="lup_014" ~ 
+      case_when(
+      time_from_t0 > 0 ~ 1,
+      T ~ 0),
+    T ~ 0))%>%
+  filter(remove == 0 )%>%
+  dplyr::select(-remove)
+ 
+##Merge with randomization, Cytokine and Sex
+group_cytokine<-read_excel(path = here("Data","grouping_cytokine.xlsx"))
+
+sex.data<- read_excel(path =  here("Data",
+                                                paste0("vo2max", 
+                                                      ifelse(mITT, "_mITT", 
+                                                      ifelse(PP,"_PP","")),
+                                                      ".xlsx")))%>%
+  dplyr::select(id, sex)
+
+sex.data<-sex.data[!duplicated(sex.data), ]
+
+bloodsamples.data.sex.il6.crp <- 
+  Bloodsamples.il6.crp.BLFU %>%
+  left_join(group_cytokine)%>%
+  left_join(sex.data)
+
+## Constrain Baseline:
+
+bloodsamples.data.sex.il6.crp<-bloodsamples.data.sex.il6.crp%>%mutate(
+  treat = case_when(
+    timepoint == "baseline" ~ "Pingvin",
+    timepoint == "screening" ~ "Pingvin",
+    timepoint == "followup" ~ treatment,
+    T~NA_character_
+  ))%>%mutate(
+    treat = factor(treat, levels = c("Pingvin", "Søløve")),
+    timepoint = factor(timepoint, levels = c("screening", "baseline", "followup")),
+    crp = `C-reaktivt protein [HSCRP];P` ,
+    il6 = `Interleukin-6;P`
+  )
+
+
+```
+
+## LMM on that then I guess
+
+```{r}
+model1.crp <- lmm(
+  formula = crp ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = bloodsamples.data.sex.il6.crp
+)
+
+summary(model1.crp)
+
+model2.crp.il6 <- lmm(
+  formula = crp ~ timepoint+il6+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = bloodsamples.data.sex.il6.crp
+)
+
+summary(model2.crp.il6)
+
+model3.crp.il6 <- lmm(
+  formula = crp ~ timepoint+il6+treat:timepoint+il6:treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = bloodsamples.data.sex.il6.crp
+)
+
+summary(model3.crp.il6)
+
+model4.crp.il6 <- lmm(
+  formula = crp ~ timepoint+il6+m_1_2+treat:timepoint+il6:treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = bloodsamples.data.sex.il6.crp
+)
+
+summary(model4.crp.il6)
+
+model.crp.il6 <- lmm(
+  formula = crp ~ il6+il6:m_1_2,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = bloodsamples.data.sex.il6.crp
+)
+
+summary(model.crp.il6)
+```
+
+## 3d graphics
+
+```{r}
+renv::install("plotly")
+library(plotly)
+
+threed.plot<-plot_ly(
+        x=bloodsamples.data.sex.il6.crp$m_1_2, 
+        y=bloodsamples.data.sex.il6.crp$crp, 
+        z=bloodsamples.data.sex.il6.crp$il6, 
+        color=bloodsamples.data.sex.il6.crp$treat,
+        type="scatter3d", mode="markers" )
+
+threed.plot
+```
+
+## Pivot Wider
+
+```{r}
+bloodsamples.data.sex.il6.crp.wide <- bloodsamples.data.sex.il6.crp %>%
+  pivot_wider(
+    id_cols = c(id, treatment:sex),
+    names_from = timepoint,
+    values_from = c(`Hæmoglobin;B`:`Cardiolipin-Ab gruppe;P`,crp,il6)
+  )%>%mutate(
+    il6_change = il6_followup-il6_baseline,
+    crp_change = crp_followup-crp_baseline
+  )
+                                                                                    
+```
+
+## Graphics of change:
+
+```{r}
+delta_crp_m.1.2 <- 
+  ggplot(bloodsamples.data.sex.il6.crp.wide, 
+         aes(
+           x = m_1_2, 
+           y = crp_change, 
+           colour = treatment)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.95) + 
+        theme_bw()
+delta_crp_m.1.2
+```
+

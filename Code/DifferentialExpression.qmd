@@ -36,8 +36,8 @@ Read data from excel documents
 nanostring_ID_as_rows<-read_excel(path=here("output","nanostring_ID_as_rows.xlsx"))%>%
   mutate(id = to_snake_case(ID))
 
-group<-read_excel(path=here("data","RandomizationKey_pingvin_søløve.xlsx"))%>%dplyr::select(ID,Allocation)%>%
-  mutate(treatment=Allocation)
+group<-read_excel(path=here("data","RandomizationKey_pingvin_søløve_With_assessors_Best_Guess.xlsx"))%>%dplyr::select(ID,`True Allocation`)%>%
+  mutate(treatment=`True Allocation`)
 colnames(group)<-to_snake_case(colnames(group))
 group$id<-to_snake_case(group$id)
 
@@ -52,7 +52,7 @@ str(gene_ex_data)
 
 ```{r}
 data<-gene_ex_data%>%filter(timepoint!="HealthyControl")%>%filter(timepoint!="Extra") %>% mutate(treat = case_when(
-  timepoint == "Baseline" ~ "Pingvin",
+  timepoint == "Baseline" ~ "Kontrol",
   T~treatment
 ))
 colnames(data)<-to_snake_case(colnames(data))
@@ -182,9 +182,11 @@ volcano_plot_adj #This plot is a bit boring, but more true, most of what happens
 
 ```
 
+# Negative Binomial Regression
+
 # Principal component analysis
 
-Linear mixed model on principle components
+Linear mixed model on principle components instead?
 
 ```{r}
 

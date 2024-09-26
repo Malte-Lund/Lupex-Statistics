@@ -1,0 +1,64 @@
+---
+title: "HalpJulie"
+format: html
+editor: visual
+---
+
+
+#sample data for Julie to help
+
+```{r}
+library(dplyr)
+library(LMMstar)
+set.seed(12012121)
+aerobiccapacity <- c(rnorm(75, mean = 25, sd = 2),
+                     rnorm(5, mean = 35, sd = 2),
+                     rnorm(5, mean = 33, sd = 2),
+                     rnorm(5, mean = 31, sd = 2),
+                     rnorm(5, mean = 29, sd = 2),
+                     rnorm(5, mean = 26, sd = 2))
+id <- as.factor(paste0("lup0",c(1:50, 1:50)))
+
+sex <- c(sample(c("F","M"), 
+                size = 50, 
+                replace = T, 
+                prob=c(0.95,0.05)), 
+                rep(NA_character_, 50))
+m_1_2_quantile_at_baseline <- factor(c(
+  sample(c("lowest 33%","mid 33%", "high 33%"), size = 25, replace = T),
+  sample(c("lowest 33%","mid 33%", "high 33%"), size = 5, replace = T, prob = c(0.7,0.2,0.1)),
+  sample(c("lowest 33%","mid 33%", "high 33%"), size = 5, replace = T, prob = c(0.5,0.3,0.2)),
+  sample(c("lowest 33%","mid 33%", "high 33%"), size = 5, replace = T, prob = c(0.333,0.334,0.333)),
+  sample(c("lowest 33%","mid 33%", "high 33%"), size = 5, replace = T, prob = c(0.2,0.3,0.5)),
+  sample(c("lowest 33%","mid 33%", "high 33%"), size = 5, replace = T, prob = c(0.1,0.2,0.7)),
+  rep(NA_character_, 50)
+  ), 
+  levels=c("lowest 33%","mid 33%", "high 33%"))
+
+timepoint <- c(rep("baseline", 50),rep("followup", 50))
+treat <- c(rep("control", 75),rep("exercise", 25))
+
+halp.df <- 
+  data.frame(id, timepoint, treat, sex, m_1_2_quantile_at_baseline, aerobiccapacity)|>
+  group_by(id)|>
+  fill(sex)|>
+  fill(m_1_2_quantile_at_baseline)
+
+
+halp.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+ m_1_2_quantile_at_baseline+treat:timepoint:m_1_2_quantile_at_baseline+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = halp.df
+    
+)
+
+summary(halp.lmm)
+
+
+effectsmodel3.IFNquants<-effects(halp.lmm, 
+        variable = "treat", 
+        conditional = c("timepoint", "m_1_2_quantile_at_baseline"))
+
+halp.df.whereareCIs<-as.data.frame(effectsmodel3.IFNquants$univariate)
+```

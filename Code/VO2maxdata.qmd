@@ -17,6 +17,7 @@ library(car)
 library(writexl)
 library(LMMstar)
 library(plotly)
+library(stringr)
 #install.packages("targets")
 #library(targets)
 #use_targets()
@@ -30,29 +31,67 @@ PP=F
 ## Import data
 
 ```{r}
-vo2max.data <- read_excel(path =  here("Data",
-                                                paste0("vo2max", 
-                                                      ifelse(mITT, "_mITT", 
-                                                      ifelse(PP,"_PP","")),
-                                                      ".xlsx")))
+vo2max.data.full <- read_excel(path =  here("Data","vo2max.xlsx"))
+
+PP_list <- read_excel(
+    path=here("Output","Compliance.xlsx")
+  )
+
+vo2max.data.full<-
+  vo2max.data.full|>
+  left_join(PP_list)
+
+linear.mixed.model.list<-
+  readRDS(
+    file = here(
+      "Output",
+            paste0(
+              "LMM_List", 
+              ifelse(PP, "PP", "mITT"),
+                ".rds"
+        )
+      )
+    )
+
+#linear.mixed.model.df<-as.data.frame(do.call(rbind, linear.mixed.model.list))|>
+#  tibble::rownames_to_column(var="model_outcome")|>
+#  mutate(
+#    model_number = str_extract(model_outcome, "\\d"),
+#    model = str_split_fixed(model_outcome, pattern = fixed("."), n=4)[,1], #strsplit(model_outcome, split = ".", fixed = T),
+#    model_name = str_split_fixed(model_outcome, pattern = fixed("."), n=4)[,2],
+#    outcome = str_split_fixed(model_outcome, pattern = fixed("."), n=4)[,3], 
+#    predictor = str_split_fixed(model_outcome, pattern = fixed("."), n=4)[,4] 
+   # outcome = str_extract(model_outcome, "([a-z]+).")
+#  )
+
 
 ```
 
 ## Constrain baseline
 
 ```{r}
-vo2max.data<-vo2max.data%>%mutate(
+vo2max.data.full<-vo2max.data.full%>%mutate(
   treat = case_when(
-    timepoint == "baseline" ~ "Pingvin",
-    timepoint == "screening" ~ "Pingvin",
+    timepoint == "baseline" ~ "control",
+    timepoint == "screening" ~ "control",
     timepoint == "followup" ~ treatment,
     T~NA_character_
   ))%>%mutate(
-    treat = factor(treat, levels = c("Pingvin", "Søløve")),
+    treat = factor(treat, levels = c("control", "exercise")),
     timepoint = factor(timepoint, levels = c("screening", "baseline", "followup"))
   )
 
 
+```
+
+Establish PP data.sets
+
+```{r}
+if(PP){
+ vo2max.data<- vo2max.data.full|>filter(PP)
+} else {
+ vo2max.data <- vo2max.data.full
+}
 ```
 
 ## Take a look at some histograms & summary statistics data
@@ -83,35 +122,58 @@ plot(sss2, type = "cor") ## right panel
 ## Main Model
 
 ```{r}
-model1.kondital.lmm<-lmm(
+model1.main.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
-summary(model1.kondital.lmm)
-plot(model1.kondital.lmm, type = "scatterplot")
-plot(model1.kondital.lmm, type = "qqplot")
+summary(model1.main.aerobic_capacity.lmm, level = 0.975)
+plot(model1.main.aerobic_capacity.lmm, type = "scatterplot")
+plot(model1.main.aerobic_capacity.lmm, type = "qqplot")
 #anova(model1.kondital.lmm)
-effects(model1.kondital.lmm, variable = NULL)
+effects(model1.main.aerobic_capacity.lmm, variable = NULL)
 
-model2.kondital.lmm<-lmm(
+model.tables(model1.main.aerobic_capacity.lmm)
+
+linear.mixed.model.list$model1.main.aerobic_capacity.lmm<-
+  model.tables(model1.main.aerobic_capacity.lmm, level = 0.975)
+
+#TODO check model.tables funktionen til at hive summary scores ud af LMM-objekter.
+
+model2.interaction_m12.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
 
-summary(model2.kondital.lmm)
-plot(model2.kondital.lmm, type = "scatterplot")
-plot(model2.kondital.lmm, type = "qqplot")
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model2.interaction_m12.aerobic_capacity.lmm,level = 0.975)
+plot(model2.interaction_m12.aerobic_capacity.lmm, type = "scatterplot")
+plot(model2.interaction_m12.aerobic_capacity.lmm, type = "qqplot")
 #anova(model2.kondital.lmm)
+effects(model2.interaction_m12.aerobic_capacity.lmm, variable = "treat")
 
-effects(model2.kondital.lmm, variable = NULL)
-effects(model2.kondital.lmm, variable = "treat")
+linear.mixed.model.list$model2.interaction_m12.aerobic_capacity.lmm <-
+  model.tables(model2.interaction_m12.aerobic_capacity.lmm, level = 0.975)
+
+#effect of operator
+#model2.kondital.operatorrandom.lmm<-lmm(
+#  formula = kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+#  repetition = ~timepoint|id+operator|id,
+#  structure = "UN",
+#  data = vo2max.data
+#)
+
+#summary(model2.kondital.operatorrandom.lmm)
+#plot(model2.kondital.operatorrandom.lmm, type = "scatterplot")
+#plot(model2.kondital.operatorrandom.lmm, type = "qqplot")
 
 
-model2.kondital.lmm.outlier.removal<-
+model3.no_outlier_m12_interaction.aerobic_capacity.lmm<-
   lmm(
   formula = kondital ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
@@ -120,73 +182,96 @@ model2.kondital.lmm.outlier.removal<-
   filter(m_1_2<11.6)
 )
 
-summary(model2.kondital.lmm.outlier.removal)
-plot(model2.kondital.lmm.outlier.removal, type = "scatterplot")
-plot(model2.kondital.lmm.outlier.removal, type = "qqplot")
+summary(model3.no_outlier_m12_interaction.aerobic_capacity.lmm)
+plot(model3.no_outlier_m12_interaction.aerobic_capacity.lmm, type = "scatterplot")
+plot(model3.no_outlier_m12_interaction.aerobic_capacity.lmm, type = "qqplot")
 #anova(model2.kondital.lmm)
 
 
+linear.mixed.model.list$model3.no_outlier_m12_interaction.aerobic_capacity.lmm <- model.tables(model3.no_outlier_m12_interaction.aerobic_capacity.lmm, level = 0.975)
 
-model3.kondital.m.1.2.sexinteract.lmm<-lmm(
+model4.sex_m12_interaction.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat+treat:timepoint:sex+ m_1_2+treat:timepoint:m_1_2:sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
 
-summary(model3.kondital.m.1.2.sexinteract.lmm)
-plot(model3.kondital.m.1.2.sexinteract.lmm, type = "scatterplot")
-plot(model3.kondital.m.1.2.sexinteract.lmm, type = "qqplot")
+summary(model4.sex_m12_interaction.aerobic_capacity.lmm)
+plot(model4.sex_m12_interaction.aerobic_capacity.lmm, type = "scatterplot")
+plot(model4.sex_m12_interaction.aerobic_capacity.lmm, type = "qqplot")
+linear.mixed.model.list$model4.sex_m12_interaction.aerobic_capacity.lmm<-
+  model.tables(model4.sex_m12_interaction.aerobic_capacity.lmm, level = 0.975)
 
-
-model2.kondital.el.sherb.lmm<-lmm(
+model5.el_sherbiny_interaction.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat+treat:timepoint+ ifn_1_el_sherb+treat:timepoint:ifn_1_el_sherb+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
 
-summary(model2.kondital.el.sherb.lmm)
-plot(model2.kondital.el.sherb.lmm, type = "scatterplot")
-plot(model2.kondital.el.sherb.lmm, type = "qqplot")
+summary(model5.el_sherbiny_interaction.aerobic_capacity.lmm)
+plot(model5.el_sherbiny_interaction.aerobic_capacity.lmm, type = "scatterplot")
+plot(model5.el_sherbiny_interaction.aerobic_capacity.lmm, type = "qqplot")
 
+linear.mixed.model.list$model5.el_sherbiny_interaction.aerobic_capacity.lmm<-
+  model.tables(model5.el_sherbiny_interaction.aerobic_capacity.lmm)
 
-model2.kondital.m1.2_geomean.lmm<-lmm(
+model6.m_1_2_geomean_interaction.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat+treat:timepoint+ m_1_2_geomean+treat:timepoint:m_1_2_geomean+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
 
-summary(model2.kondital.m1.2_geomean.lmm)
-plot(model2.kondital.m1.2_geomean.lmm, type = "scatterplot")
-plot(model2.kondital.m1.2_geomean.lmm, type = "qqplot")
+summary(model6.m_1_2_geomean_interaction.aerobic_capacity.lmm)
+plot(model6.m_1_2_geomean_interaction.aerobic_capacity.lmm, type = "scatterplot")
+plot(model6.m_1_2_geomean_interaction.aerobic_capacity.lmm, type = "qqplot")
+linear.mixed.model.list$model6.m_1_2_geomean_interaction.aerobic_capacity.lmm <-
+  model.tables(model6.m_1_2_geomean_interaction.aerobic_capacity.lmm, level = 0.975)
 
+#log_geomean ?? 
+vo2max.data<- vo2max.data|>mutate(
+  log_m_1_2_geomean = log(m_1_2_geomean)
+)
+model7.log_m_1_2_geomean_interaction.aerobic_capacity.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint+ log_m_1_2_geomean+treat:timepoint:log_m_1_2_geomean+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data
+)
 
-model1.vo2max.lmm<-lmm(
+summary(model7.log_m_1_2_geomean_interaction.aerobic_capacity.lmm)
+plot(model7.log_m_1_2_geomean_interaction.aerobic_capacity.lmm, type = "scatterplot")
+plot(model7.log_m_1_2_geomean_interaction.aerobic_capacity.lmm, type = "qqplot")
+linear.mixed.model.list$model7.log_m_1_2_geomean_interaction.aerobic_capacity.lmm <-
+  model.tables(model7.log_m_1_2_geomean_interaction.aerobic_capacity.lmm, level = 0.975)
+
+model8.main_vo2max_nointeraction.vo2max.lmm<-lmm(
   formula = vo_2_max ~ timepoint+treat+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
-summary(model1.vo2max.lmm)
-plot(model1.vo2max.lmm, type = "scatterplot")
-plot(model1.vo2max.lmm, type = "qqplot")
+summary(model8.main_vo2max_nointeraction.vo2max.lmm)
+plot(model8.main_vo2max_nointeraction.vo2max.lmm, type = "scatterplot")
+plot(model8.main_vo2max_nointeraction.vo2max.lmm, type = "qqplot")
+linear.mixed.model.list$model8.main_vo2max_nointeraction.vo2max.lmm <-
+  model.tables(model8.main_vo2max_nointeraction.vo2max.lmm, level = 0.975)
 
 
 
-
-model2.vo2max.lmm<-lmm(
+model9.interaction_m_1_2_vo2max.vo2max.lmm<-lmm(
   formula = vo_2_max ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data
 )
 
-summary(model2.vo2max.lmm)
-plot(model2.vo2max.lmm, type = "scatterplot")
-plot(model2.vo2max.lmm, type = "qqplot")
-
+summary(model9.interaction_m_1_2_vo2max.vo2max.lmm)
+plot(model9.interaction_m_1_2_vo2max.vo2max.lmm, type = "scatterplot")
+plot(model9.interaction_m_1_2_vo2max.vo2max.lmm, type = "qqplot")
+linear.mixed.model.list$model9.interaction_m_1_2_vo2max.vo2max.lmm <- model.tables(model9.interaction_m_1_2_vo2max.vo2max.lmm)
 
 #library(lme4)
 #lmmodel1 <- lmer(
@@ -206,30 +291,339 @@ plot(model2.vo2max.lmm, type = "qqplot")
 #Anova(lmmodel2, type =3)
 ```
 
+## Model after quality assessment
+
+```{r}
+data_vo2max_QC<-read_excel(
+  path = here("Output","VO2maxQC","Data.VO2MAXQC.xlsx")
+)
+
+data_vo2max_QC<-data_vo2max_QC|>
+  dplyr::select(id, timepoint, aerobiccapacity, aerobiccapacity_noted, QualityMeasurementCS, easytrialQualityTest, QualityMeasurementMLA, operator)
+
+vo2_with_quality_controls<-vo2max.data|>left_join(data_vo2max_QC)|>
+  mutate(timepoint = factor(timepoint, levels = c("screening", "baseline", "followup")))
+```
+
+### Easytrial Assessment
+
+```{r}
+Easytrial_Vo2max <- vo2_with_quality_controls |> dplyr::filter(
+  easytrialQualityTest
+)|>
+  group_by(id) %>% 
+    filter(!duplicated(timepoint))
+
+
+
+model10.main_after_QC.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+)
+summary(model10.main_after_QC.aerobic_capacity.lmm)
+plot(model10.main_after_QC.aerobic_capacity.lmm, type = "scatterplot")
+plot(model10.main_after_QC.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+
+model.tables(model10.main_after_QC.aerobic_capacity.lmm, level =0.975)
+
+linear.mixed.model.list$model10.main_after_QC.aerobic_capacity.lmm<-
+  model.tables(model10.main_after_QC.aerobic_capacity.lmm, level =0.975)
+
+#TODO check model.tables funktionen til at hive summary scores ud af LMM-objekter.
+
+model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+    
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm, level =0.975)
+plot(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm, type = "scatterplot")
+plot(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+effects(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm, variable = NULL)
+
+linear.mixed.model.list$model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm <-
+  model.tables(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm, level =0.975)
+
+```
+
+### MLA Assessment
+
+```{r}
+MLA_Vo2max <- vo2_with_quality_controls |> dplyr::filter(
+  QualityMeasurementMLA
+)|>
+  group_by(id) %>% 
+    filter(!duplicated(timepoint))
+
+model12.main_after_QC_MLA_version.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = MLA_Vo2max
+)
+summary(model12.main_after_QC_MLA_version.aerobic_capacity.lmm, level =0.975)
+plot(model12.main_after_QC_MLA_version.aerobic_capacity.lmm, type = "scatterplot")
+plot(model12.main_after_QC_MLA_version.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+
+model.tables(model12.main_after_QC_MLA_version.aerobic_capacity.lmm, level = 0.975)
+
+linear.mixed.model.list$model12.main_after_QC_MLA_version.aerobic_capacity.lmm<-
+  model.tables(model12.main_after_QC_MLA_version.aerobic_capacity.lmm, level = 0.975)
+
+#TODO check model.tables funktionen til at hive summary scores ud af LMM-objekter.
+
+model13.m_1_2_interaction_after_QC_MLA.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = MLA_Vo2max
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model13.m_1_2_interaction_after_QC_MLA.aerobic_capacity.lmm, level = 0.975)
+plot(model13.m_1_2_interaction_after_QC_MLA.aerobic_capacity.lmm, type = "scatterplot")
+plot(model13.m_1_2_interaction_after_QC_MLA.aerobic_capacity.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+
+linear.mixed.model.list$model13.m_1_2_interaction_after_QC_MLA.aerobic_capacity.lmm <- 
+  model.tables(model13.m_1_2_interaction_after_QC_MLA.aerobic_capacity.lmm, level = 0.975)
+```
+
+### CS Assessment
+
+```{r}
+
+CS_Vo2max <- vo2_with_quality_controls |> dplyr::filter(
+  QualityMeasurementCS
+)|>
+  group_by(id) %>% 
+    filter(!duplicated(timepoint))
+
+model14.main_after_QC_CS_version.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = CS_Vo2max
+)
+summary(model14.main_after_QC_CS_version.aerobic_capacity.lmm)
+plot(model14.main_after_QC_CS_version.aerobic_capacity.lmm, type = "scatterplot")
+plot(model14.main_after_QC_CS_version.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model14.main_after_QC_CS_version.aerobic_capacity.lmm, variable = NULL)
+
+model.tables(model14.main_after_QC_CS_version.aerobic_capacity.lmm, level = 0.975)
+
+linear.mixed.model.list$model14.main_after_QC_CS_version.aerobic_capacity.lmm<-
+  model.tables(model14.main_after_QC_CS_version.aerobic_capacity.lmm, level = 0.975)
+
+#TODO check model.tables funktionen til at hive summary scores ud af LMM-objekter.
+
+model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = CS_Vo2max
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm, level = 0.975)
+plot(model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm, type = "scatterplot")
+plot(model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+effects(model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm, variable = NULL)
+
+linear.mixed.model.list$model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm <-
+  model.tables(model15.m_1_2_interaction_after_QC_CS.aerobic_capacity.lmm, level = 0.975)
+```
+
+### Pooles Assessment
+
+```{r}
+##Controlled by Pooles method
+data_vo2max_QC_poole<-read_excel(
+  path = here("Output","VO2maxQC","Data.VO2MAXQC_poole.xlsx"))|>
+  dplyr::select(id, timepoint, aerobiccapacity, aerobiccapacity_noted, QualityMeasurementCS)
+
+vo2_with_Poole_quality_controls<-vo2max.data|>left_join(data_vo2max_QC_poole)
+
+Poole_Vo2max <- vo2_with_Poole_quality_controls |> dplyr::filter(
+  QualityMeasurementCS
+)|>
+  group_by(id) %>% 
+    filter(!duplicated(timepoint))
+
+model16.main_after_QC_Pooles_version.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Poole_Vo2max
+)
+summary(model16.main_after_QC_Pooles_version.aerobic_capacity.lmm, level = 0.975)
+plot(model16.main_after_QC_Pooles_version.aerobic_capacity.lmm, type = "scatterplot")
+plot(model16.main_after_QC_Pooles_version.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+
+model.tables(model16.main_after_QC_Pooles_version.aerobic_capacity.lmm, level =0.975)
+
+linear.mixed.model.list$model16.main_after_QC_Pooles_version.aerobic_capacity.lmm<-
+  model.tables(model16.main_after_QC_Pooles_version.aerobic_capacity.lmm, level =0.975)
+
+#TODO check model.tables funktionen til at hive summary scores ud af LMM-objekter.
+
+model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Poole_Vo2max
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm, level =0.975)
+plot(model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm, type = "scatterplot")
+plot(model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+effects(model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm, variable = NULL)
+
+linear.mixed.model.list$model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm <-
+  model.tables(model17.m_1_2_interaction_after_QC_Poole.aerobic_capacity.lmm, level =0.975)
+
+```
+
+## Model on Quantile Interaction, because it makes it easier to do graphics for
+
+```{r}
+quant.m12.easytrialvo2max<-Easytrial_Vo2max|>
+  filter( timepoint =="baseline")|>
+  pull(m_1_2)|>
+  quantile(probs=c(0.33, .67), na.rm=T)
+  
+
+Easytrial_Vo2max<-Easytrial_Vo2max%>% 
+  mutate(  
+    m_1_2_quantile_at_baseline = 
+             case_when(is.na(m_1_2)~ NA_character_,
+                       T ~ factor(
+                         findInterval(m_1_2, c(-Inf, quant.m12.easytrialvo2max, Inf)))),
+    m_1_2_quantile_at_baseline = 
+             factor(m_1_2_quantile_at_baseline, 
+                    levels = 1:3, 
+                    labels = c("lowest 33%", "middle 33-67%", "highest 33%")),
+    treat_constrain_at_base = case_when(
+             timepoint == "screening" ~ "control",
+             T ~ treatment)
+           )
+ 
+model18.m_1_2_quantile_interaction.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+ m_1_2_quantile_at_baseline+treat:timepoint:m_1_2_quantile_at_baseline+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+    
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, level = 0.975)
+plot(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, type = "scatterplot")
+plot(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+effects(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, variable = c("treat"))
+
+linear.mixed.model.list$model18.m_1_2_quantile_interaction.aerobic_capacity.lmm <-
+  model.tables(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, level = 0.975)
+
+plot(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, type = "fit")
+
+model18_plot<-plot(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, type = "fit", 
+     obs.alpha = 0.2, 
+     ci = FALSE, 
+     size.text = 12, 
+     colo="treat_constrain_at_base", 
+     facet = ~m_1_2_quantile_at_baseline)
+
+effectsmodel3.IFNquants<-effects(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm, 
+        variable = "treat", 
+        conditional = c("timepoint", "m_1_2_quantile_at_baseline"))
+
+df.confint<-confint(model18.m_1_2_quantile_interaction.aerobic_capacity.lmm)
+
+Easytrial_Vo2max |>
+  ggplot(aes(x=timepoint, y=kondital, colour = treat, group = treat))+
+  stat_function(fun = model18.m_1_2_quantile_interaction.aerobic_capacity.lmm)
+
+
+model18prettyplot<-model18_plot$plot + 
+  labs(
+    x = "Timepoint",
+    color = "Intervention Group",
+    y = "Aerobic Capacity (ml/kg/min)",
+    subtitle = "IFN-\u03B1 Score Tertile"
+  )+
+  theme(plot.subtitle = element_text(hjust = 0.5))
+
+ggsave(
+  filename=
+    here("output","graphics", "IFN_quartiles_Effect.jpg"),
+  plot=model18prettyplot,
+  width = 12)
+
+saveRDS(model18_plot,
+        file = here("output", "graphics", "asRDS", "model18_plot.rds"))
+
+```
+
 ## Model on just baseline and followup because screening is statistically different from baseline
 
 ```{r}
 vo2max.data.no.screen <- vo2max.data %>% dplyr::filter(timepoint != "screening")
 
-model.noscreen.kondital.lmm<-lmm(
+model19.main_no_screening.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data.no.screen
 )
-summary(model.noscreen.kondital.lmm)
-plot(model.noscreen.kondital.lmm, type = "scatterplot")
-plot(model.noscreen.kondital.lmm, type = "qqplot")
+summary(model19.main_no_screening.aerobic_capacity.lmm, level = 0.975)
+plot(model19.main_no_screening.aerobic_capacity.lmm, type = "scatterplot")
+plot(model19.main_no_screening.aerobic_capacity.lmm, type = "qqplot")
+plot(model19.main_no_screening.aerobic_capacity.lmm, type = "fit")
+linear.mixed.model.list$model19.main_no_screening.aerobic_capacity.lmm <-
+  model.tables(model19.main_no_screening.aerobic_capacity.lmm, level = 0.975)
 
-model2.interaction.m12.noscreen.kondital.lmm<-lmm(
+model20.m_1_2_interaction_no_screening.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat:timepoint+m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data.no.screen
 )
-summary(model2.interaction.m12.noscreen.kondital.lmm)
-plot(model2.interaction.m12.noscreen.kondital.lmm, type = "scatterplot")
-plot(model2.interaction.m12.noscreen.kondital.lmm, type = "qqplot")
+summary(model20.m_1_2_interaction_no_screening.aerobic_capacity.lmm, level = 0.975)
+plot(model20.m_1_2_interaction_no_screening.aerobic_capacity.lmm, type = "scatterplot")
+plot(model20.m_1_2_interaction_no_screening.aerobic_capacity.lmm, type = "qqplot")
+linear.mixed.model.list$model20.m_1_2_interaction_no_screening.aerobic_capacity.lmm <-
+  model.tables(model20.m_1_2_interaction_no_screening.aerobic_capacity.lmm, level = 0.975)
 
 
 ```
@@ -241,36 +635,244 @@ So we'll make that analysis as an exploratory measure, but we are throwing out a
 ```{r}
 vo2max.data.high.m.1.2 <- vo2max.data %>% filter(m_1_2>2)
 
-model.high.m.1.2.kondital.lmm<-lmm(
+model21.main_no_normal_m_1_2.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data.high.m.1.2
 )
-summary(model.high.m.1.2.kondital.lmm)
-plot(model.high.m.1.2.kondital.lmm, type = "scatterplot")
-plot(model.high.m.1.2.kondital.lmm, type = "qqplot")
+summary(model21.main_no_normal_m_1_2.aerobic_capacity.lmm, level = 0.975)
+plot(model21.main_no_normal_m_1_2.aerobic_capacity.lmm, type = "scatterplot")
+plot(model21.main_no_normal_m_1_2.aerobic_capacity.lmm, type = "qqplot")
 
-model2.interaction.m12.high.m.1.2.kondital.lmm<-lmm(
+linear.mixed.model.list$model21.main_no_normal_m_1_2.aerobic_capacity.lmm <-
+  model.tables(model21.main_no_normal_m_1_2.aerobic_capacity.lmm, level = 0.975)
+
+
+model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm<-lmm(
   formula = kondital ~ timepoint+treat:timepoint+m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = vo2max.data.high.m.1.2
 )
-summary(model2.interaction.m12.high.m.1.2.kondital.lmm)
-plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "scatterplot")
-plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "qqplot")
-plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "fit", facet=~sex)
+summary(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, level = 0.975)
+plot(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, type = "scatterplot")
+plot(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, type = "qqplot")
+plot(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, type = "fit", facet=~sex)
 
-plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "fit")
-plot(model2.interaction.m12.high.m.1.2.kondital.lmm, type = "partial", type.residual = c("(Intercept)","treat","timepoint"))
+plot(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, type = "fit")
+plot(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, type = "partial", type.residual = c("(Intercept)","treat","timepoint"))
+
+linear.mixed.model.list$model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm <-
+  model.tables(model22.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity.lmm, level = 0.975)
+
+
+```
+
+### We'll also answer Søren Js question on the quality controlled data
+
+```{r}
+vo2max.data.high.m.1.2_QC <- vo2_with_quality_controls |> dplyr::filter(
+  easytrialQualityTest) |> filter(m_1_2>2)
+
+model23.main_no_normal_m_1_2_afterQC.aerobic_capacity.lmm<-lmm(
+  formula = kondital ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data.high.m.1.2_QC)
+summary(model23.main_no_normal_m_1_2_afterQC.aerobic_capacity.lmm, level =0.975)
+plot(model23.main_no_normal_m_1_2_afterQC.aerobic_capacity.lmm, type = "scatterplot")
+plot(model23.main_no_normal_m_1_2_afterQC.aerobic_capacity.lmm, type = "qqplot")
+linear.mixed.model.list$model23.main_no_normal_m_1_2_afterQC.aerobic_capacity.lmm <-
+  model.tables(model23.main_no_normal_m_1_2_afterQC.aerobic_capacity.lmm, level = 0.975)
+
+model24.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity_QC.lmm<-lmm(
+  formula = kondital ~ timepoint+treat:timepoint+m_1_2+treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = vo2max.data.high.m.1.2_QC
+)
+summary(model24.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity_QC.lmm, level = 0.975)
+plot(model24.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity_QC.lmm, type = "scatterplot")
+plot(model24.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity_QC.lmm, type = "qqplot")
+linear.mixed.model.list$model24.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity_QC.lmm <-
+  model.tables(model24.interaction_m_1_2_no_normal_m_1_2.aerobic_capacity_QC.lmm, level = 0.975)
+
 ```
 
 So the interaction is stronger in that case. Which is quite interesting.
 
+## Per Protocol effect of amount of successful exercise sessions and effect of attendance
+
+```{r}
+if(PP){
+full_vo2_with_quality_controls<-
+  vo2max.data.full|>
+  left_join(PP_list)|>
+  left_join(data_vo2max_QC)|>
+  mutate(timepoint = 
+           factor(timepoint, 
+                  levels = 
+                    c("screening", "baseline", "followup")))
+
+Easytrial_Vo2max_full <- 
+  full_vo2_with_quality_controls |> 
+  dplyr::filter(
+  easytrialQualityTest)|>
+  group_by(id) %>% 
+    filter(!duplicated(timepoint))
+
+model25.main_QC_PP_effect.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint:PP+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max_full
+)
+
+summary(model25.main_QC_PP_effect.aerobic_capacity.lmm, level = 0.975)
+plot(model25.main_QC_PP_effect.aerobic_capacity.lmm, type = "scatterplot")
+plot(model25.main_QC_PP_effect.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+
+
+model26.main_QC_attendance_effect.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+attendance+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max_full
+)
+summary(model26.main_QC_attendance_effect.aerobic_capacity.lmm, level = 0.975)
+plot(model26.main_QC_attendance_effect.aerobic_capacity.lmm, type = "scatterplot")
+plot(model26.main_QC_attendance_effect.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model26.main_QC_attendance_effect.aerobic_capacity.lmm, variable = NULL)
+
+model.tables(model26.main_QC_attendance_effect.aerobic_capacity.lmm, level = 0.975)
+
+linear.mixed.model.list$model26.main_QC_attendance_effect.aerobic_capacity.lmm<-
+  model.tables(model26.main_QC_attendance_effect.aerobic_capacity.lmm, level =0.975)
+
+model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+successful_exercise+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max_full
+)
+summary(model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm)
+plot(model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm, type = "scatterplot")
+plot(model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm, variable = NULL)
+linear.mixed.model.list$model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm<-
+  model.tables(model27.main_QC_succesfulexercise_effect.aerobic_capacity.lmm, level =0.975)
+
+
+#TODO check model.tables funktionen til at hive summary scores ud af LMM-objekter.
+
+model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+PP:treat:timepoint+ m_1_2+PP:treat:timepoint:m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max_full
+    
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm, levels = 0.975)
+plot(model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm, type = "scatterplot")
+plot(model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+effects(model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm, variable = NULL)
+
+linear.mixed.model.list$model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm <- model.tables(model28.interaction_m_1_2_PP_effect_QC.aerobic_capacity_QC.lmm, level = 0.975)
+
+}
+```
+
+##Loop over the interaction effects:
+
+```{r}
+list_of_scores_to_see_differences_over <- c(
+  "m_1_2", 
+  "m_1_2_geomean",
+  "m_3_4", 
+  "m_3_4_geomean",
+  "m_5_12", 
+  "m_5_12_geomean",
+  "ifn_1_el_sherb", 
+  "ifn_1_el_sherb_geomean",
+  "ifn_2_el_sherb", 
+  "ifn_2_el_sherb_geomean",
+  "tnf_related", 
+  "tnf_related_geomean",
+  "il_6_related", 
+  "il_6_related_geomean",
+  "ifn_alpha_siddiqi",
+  "ifn_alpha_siddiqi_geomean",
+  "ifn_beta_siddiqi",
+  "ifn_beta_siddiqi_geomean",
+  "ifn_gamma_siddiqi",
+  "ifn_gamma_siddiqi_geomean"   )
+
+list_of_vo2max_ifn_scores<-list()
+
+for (IFNsig in list_of_scores_to_see_differences_over){
+  i<-as.character(28+which(list_of_scores_to_see_differences_over==IFNsig))
+  model_name <- paste0("model",
+                       i,
+                       ".interaction_",
+                       IFNsig,
+                       ".aerobic_capacity.lmm")
+  
+interaction.aerobiccapacity.lmm<-lmm(
+  formula = reformulate(paste0("timepoint+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+                        response="aerobiccapacity"),
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+)
+
+summary(interaction.aerobiccapacity.lmm, level = 0.975)
+plot(interaction.aerobiccapacity.lmm, type=c("qqplot"))
+plot(interaction.aerobiccapacity.lmm, type=c("scatterplot"))
+
+list_of_vo2max_ifn_scores[[model_name]] <- 
+  model.tables(interaction.aerobiccapacity.lmm, level = 0.975)
+
+#list_of_vo2max_ifn_scores[[model_name]]$qqplot <- 
+ # plot(interaction.aerobiccapacity.lmm, type=c("qqplot"))
+
+#list_of_vo2max_ifn_scores[[model_name]]$scatterplot <- 
+ # plot(interaction.aerobiccapacity.lmm, type=c("scatterplot"))
+
+}
+#linear.mixed.model.list$ifn_score_interactions_fatigue<-list_of_fatigue_ifn_scores
+list_of_vo2max_ifn_scores
+linear.mixed.model.list$list_of_vo2max_ifn_scores<-list_of_vo2max_ifn_scores
+```
+
 ## Graphics
 
 ```{r}
+aerobiccapacity_m12_quants.plot<-plot(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm, 
+     type = "fit", color = "treatment", obs.alpha = 0.5, ci = F,
+     time.var = "timepoint", facet = ~ cut_interval(m_1_2, 3))
+
+saveRDS(
+  object = aerobiccapacity_m12_quants.plot,
+  file = here("output","graphics","fatigue_m12_quants.plot.rds")
+)
+
+ggsave(
+  plot = aerobiccapacity_m12_quants.plot$plot,
+  filename = here("output","graphics","fatigue_m12_quants.plot.jpg"),
+  width = 12
+)
+
+
 #spaghettiplot.Vo2Max<-vo2max.data%>%ggplot(
  # aes(
 #    x=timepoint,
@@ -282,12 +884,14 @@ So the interaction is stronger in that case. Which is quite interesting.
 #ggplotly(spaghettiplot.Vo2Max)
 
 
-plot(model2.kondital.lmm, type = "fit", obs.alpha = 0.4, ci = FALSE, size.text = 20, colo="treatment")
+#plot(model2.kondital.lmm, type = "fit", obs.alpha = 0.4, ci = FALSE, size.text = 20, colo="treatment")
+
+#plot(model2.kondital.easytrialQC.lmm, type = "fit", obs.alpha = 0.4, ci = FALSE, size.text = 20, colo="treatment")
 
 
 
-plot(model2.kondital.lmm, type = "fit", color = "treatment", ci.alpha = NA, size.text = 20)
-
+#plot(model2.kondital.lmm, type = "fit", color = "treatment", ci.alpha = 0.02, size.text = 20)
+#
 #plot(model.noscreen.kondital.lmm, type = "fit", color = "treatment", ci.alpha = NA, size.text = 20)
 
 
@@ -297,12 +901,14 @@ plot(model2.kondital.lmm, type = "fit", color = "treatment", ci.alpha = NA, size
 
 ```{r}
 library(tidyr)
-vo2max.data.wide<-vo2max.data %>% select(id, treatment, timepoint,
+vo2max.data.wide<-Easytrial_Vo2max %>% select(id, treatment, timepoint,
                                          kondital, vo_2_max, sex, m_1_2, m_1_2_geomean, m_3_4, m_3_4_geomean, m_5_12, m_5_12_geomean, ifn_1_el_sherb, ifn_1_el_sherb_geomean, ifn_2_el_sherb, ifn_2_el_sherb_geomean, ifn_2_siddiqi, ifn_2_siddiqi_geomean)%>% pivot_wider(
   names_from = "timepoint",
   id_cols = c("id", "treatment", "sex", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
   values_from = c("kondital", "vo_2_max")
-)%>%mutate(
+)%>%dplyr::filter(!is.na(kondital_followup))|>
+  dplyr::filter(!is.na(m_1_2))|>
+  mutate(
   delta_kondi = round(kondital_followup-(kondital_screening+kondital_baseline)/2,2),
   delta_vo2max = round(vo_2_max_followup -(vo_2_max_screening+vo_2_max_baseline)/2,1),
   delta_kondi_BLFU = kondital_followup - kondital_baseline,
@@ -313,12 +919,19 @@ vo2max.data.wide<-vo2max.data %>% select(id, treatment, timepoint,
 
 kondi_by_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi, colour = treatment)) +
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
-        theme_bw() 
+        theme_bw() +
+  labs(title = "Change in Aerobic Capacity by treatment and IFN-\u03B1 score",
+       x = "IFN-\u03B1 score (SD)",
+       y = "\u0394 Aerobic Capacity (ml/min/kg)",
+       colour = "Intervention Group")
 
 kondi_by_m.1.2
+ggsave(filename=here("Output","Graphics","kondi_by_m_1_2.jpg"),
+  plot=kondi_by_m.1.2)
 
 kondi_by_m.1.2_geomean <- ggplot(vo2max.data.wide, aes(x = m_1_2_geomean, y = delta_kondi, colour = treatment)) +
-  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+  geom_point() +  
+  geom_smooth(method="lm", se=T, level = 0.975) + 
         theme_bw() 
 
 kondi_by_m.1.2_geomean
@@ -329,11 +942,22 @@ kondi_by_IFN1_el.sherb <- ggplot(vo2max.data.wide, aes(x = ifn_1_el_sherb, y = d
 
 kondi_by_IFN1_el.sherb
 
-model.delta.kondi<-lm(delta_kondi ~ sex+m_1_2 * treatment, data = vo2max.data.wide)
+vo2max.data.wide <- vo2max.data.wide|>
+  dplyr::filter(!is.na(sex))|>
+  dplyr::filter(!is.na(kondital_baseline))|>
+  dplyr::filter(!is.na(delta_kondi))|>
+  dplyr::filter(!is.na(treatment))
+
+model.delta.kondi<-lm(delta_kondi ~ 
+                        kondital_baseline+m_1_2 * treatment, 
+                      data = vo2max.data.wide)
 summary(model.delta.kondi)
 
-model.BLFU.kondi<-lm(delta_kondi_BLFU ~ sex+m_1_2 * treatment, data = vo2max.data.wide)
+model.BLFU.kondi<-lm(delta_kondi_BLFU ~ m_1_2 * treatment, data = vo2max.data.wide)
 summary(model.BLFU.kondi)
+
+model.SCFU.kondi<-lm(delta_kondi_SCFU ~ m_1_2 * treatment, data = vo2max.data.wide)
+summary(model.SCFU.kondi)
 
 kondi_BLFU_m.1.2_geomean <- ggplot(vo2max.data.wide, aes(x = m_1_2_geomean, y = delta_kondi_BLFU, colour = treatment)) +
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
@@ -341,11 +965,16 @@ kondi_BLFU_m.1.2_geomean <- ggplot(vo2max.data.wide, aes(x = m_1_2_geomean, y = 
 
 kondi_BLFU_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi_BLFU, colour = treatment)) +
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
-        theme_bw()
-
+        theme_bw()+
+  labs(title = "Change in Aerobic Capacity by treatment and IFN-\u03B1 score",
+       x = "IFN-\u03B1 score (SD)",
+       y = "\u0394 Aerobic Capacity (ml/min/kg)",
+       colour = "Intervention Group")
 kondi_BLFU_m.1.2
+ggsave(filename=here("Output","Graphics","kondi_ChangefromBL_by_m_1_2.jpg"),
+  plot=kondi_BLFU_m.1.2)
 
-kondi_SCFU_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi_BLFU, colour = treatment)) +
+kondi_SCFU_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_kondi_SCFU, colour = treatment)) +
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
         theme_bw()
 
@@ -358,13 +987,81 @@ vo2_by_m.1.2 <- ggplot(vo2max.data.wide, aes(x = m_1_2, y = delta_vo2max, colour
 
 vo2_by_m.1.2
 
-model.delta.vo2<-lm(delta_vo2max ~ sex + m_1_2 * treatment, data = vo2max.data.wide)
+model.delta.vo2<-lm(delta_vo2max ~  m_1_2 * treatment, data = vo2max.data.wide)
 summary(model.delta.vo2)
 
 
 ```
 
+## Graphics (and exploratory models) with PP effect on change scores:
+
+```{r}
+if(PP){
+  vo2max.data.wide.full<-Easytrial_Vo2max_full %>% 
+    dplyr::select(id, PP, attendance, successful_exercise, 
+                  treatment, timepoint,
+                  kondital, vo_2_max, 
+                  sex, 
+                  m_1_2, m_1_2_geomean, 
+                  m_3_4, m_3_4_geomean, 
+                  m_5_12, m_5_12_geomean, 
+                  ifn_1_el_sherb, ifn_1_el_sherb_geomean, 
+                  ifn_2_el_sherb, ifn_2_el_sherb_geomean, 
+                  ifn_2_siddiqi, ifn_2_siddiqi_geomean)%>% 
+    pivot_wider(names_from = "timepoint",
+  id_cols = c("id", "PP","attendance","successful_exercise","treatment", "sex", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
+  values_from = c("kondital", "vo_2_max")
+)%>%dplyr::filter(!is.na(kondital_followup))|>
+  dplyr::filter(!is.na(m_1_2))|>
+  mutate(
+  delta_kondi = round(kondital_followup-(kondital_screening+kondital_baseline)/2,2),
+  delta_vo2max = round(vo_2_max_followup -(vo_2_max_screening+vo_2_max_baseline)/2,1),
+  delta_kondi_BLFU = kondital_followup - kondital_baseline,
+  delta_vo2max_BLFU = vo_2_max_followup - vo_2_max_baseline,
+  delta_kondi_SCFU = kondital_followup - kondital_screening,
+  delta_vo2max_SCFU = vo_2_max_followup - vo_2_max_screening)
+  
+kondi_by_m.1.2_PP_effect <- ggplot(vo2max.data.wide.full, aes(x = m_1_2, 
+                                                 y = delta_kondi, 
+                                                 colour = PP)) +
+  geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
+        theme_bw() 
+
+kondi_by_m.1.2_PP_effect
+
+vo2max.data.wide.full<-vo2max.data.wide.full |>mutate(
+  pp_treat = paste0(treatment," PP=",PP)
+)
+
+kondi_by_m.1.2_PP_effect <- ggplot(vo2max.data.wide.full, aes(x = m_1_2, 
+                                                 y = delta_kondi, 
+                                                 colour = pp_treat)) +
+  geom_point() +  geom_smooth(method="lm", se=F, level = 0.975) + 
+        theme_bw() +
+  scale_colour_manual(
+    labels = c("Control","Exercise not PP","Exercise PP"),
+    values = c("hotpink","darkgreen","lightblue")
+  )+
+  labs(
+    title = "Aerobic Capacity By IFN-\u03B1 signature",
+    subtitle = "Per Protocol Analysis",
+    x = "IFN-\u03B1 Signature (SD)",
+    y = "Change in Aerobic Capacity (ml/kg/min)",
+    colour = "Exercise Divided on Per Protocol"
+  )
+
+kondi_by_m.1.2_PP_effect
+
+ggsave(
+  plot = kondi_by_m.1.2_PP_effect,
+  filename = here("Output","Graphics","kondi_by_m.1.2_PP_effect.jpg")
+)
+}
+```
+
 ## Waterfall plot
+
+<https://stackoverflow.com/questions/16588022/how-can-i-reorder-the-x-axis-in-a-plot-in-r>
 
 ```{r}
 #https://stackoverflow.com/questions/16588022/how-can-i-reorder-the-x-axis-in-a-plot-in-r
@@ -419,3 +1116,39 @@ g
 ggplotly(g)
 ```
 
+## The End
+
+### Save the Linear Mixed Model List
+
+```{r}
+saveRDS(linear.mixed.model.list, 
+        file = here("Output",
+                    paste0("LMM_List", ifelse(PP, "PP", "mITT"), ".rds")))
+##Models to export (So we don't end up with the massive list we aren't using)
+
+AerobicCapacityModels<-list(
+  main.aerobic_capacity.lmm = model.tables(model10.main_after_QC.aerobic_capacity.lmm),
+  interaction.aerobic_capacity.lmm = model.tables(model11.m_1_2_interaction_after_QC.aerobic_capacity.lmm)
+)
+
+#saveRDS(
+#  AerobicCapacityModels,
+#  file = here("Output",
+#                    paste0("Aerobic_capacity_LMM_List", ifelse(PP, "PP", "mITT"), ".rds"))
+#)
+
+if(!PP){ #TODO check if this condition can be removed.
+saveRDS(
+  AerobicCapacityModels,
+  file = here("Output","LMMlists","Aerobic_capacity_LMM_List.rds")) }
+
+
+```
+
+### Print "the end"
+
+So Malte knows the code has finished when he just glances at the console.
+
+```{r}
+print("This is the end of Vo2MaxData.qmd")
+```
