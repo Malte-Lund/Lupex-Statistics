@@ -7,7 +7,7 @@ editor: visual
 # Differential Expression analysis for LUPEX
 
 ```{r}
-library(renv)
+#library(renv)
 #renv::init()
 #install.packages("readxl")
 library("readxl")
@@ -19,7 +19,7 @@ library(stringr)
 library(writexl)
 library(LMMstar)
 set.seed(69420)
-
+here::i_am("Code/DifferentialExpression.qmd")
 
 ```
 
@@ -33,17 +33,23 @@ PP = F
 Read data from excel documents
 
 ```{r}
-nanostring_ID_as_rows<-read_excel(path=here("output","nanostring_ID_as_rows.xlsx"))%>%
+nanostring_ID_as_rows<-
+  read_excel(path=here("output","nanostring_ID_as_rows.xlsx"))%>%
   mutate(id = to_snake_case(ID))
 
-group<-read_excel(path=here("data","RandomizationKey_pingvin_søløve_With_assessors_Best_Guess.xlsx"))%>%dplyr::select(ID,`True Allocation`)%>%
-  mutate(treatment=`True Allocation`)
+group<-
+  read_excel(path=here("data","RandomizationKey_Final.xlsx"))%>%dplyr::select(ID,`True Allocation`)%>%
+  mutate(treatment=case_when(`True Allocation` == "Træning" ~ "exercise",
+                             `True Allocation` == "Kontrol" ~ "control",
+                             T ~ NA_character_))
 colnames(group)<-to_snake_case(colnames(group))
 group$id<-to_snake_case(group$id)
 
 nanostring_ID_as_rows
 
-gene_ex_data<-left_join(nanostring_ID_as_rows, group)%>%relocate(id, treatment, timepoint)
+gene_ex_data<-
+  left_join(nanostring_ID_as_rows, group)%>%
+  relocate(id, treatment, timepoint)
 
 str(gene_ex_data)
 ```
@@ -51,12 +57,20 @@ str(gene_ex_data)
 # Create models, as a for loop
 
 ```{r}
-data<-gene_ex_data%>%filter(timepoint!="HealthyControl")%>%filter(timepoint!="Extra") %>% mutate(treat = case_when(
-  timepoint == "Baseline" ~ "Kontrol",
-  T~treatment
-))
+data<-
+  gene_ex_data%>%
+  filter(timepoint!="HealthyControl")%>%
+  filter(timepoint!="Extra") %>% 
+  mutate(treat = case_when(
+  timepoint == "Vaseline" ~ "control",
+  T~treatment),
+  timepoint = factor(to_snake_case(timepoint), levels = c("baseline","followup")),
+  treat = factor(treat)
+  )|>
+  dplyr::select(-ID)|>
+  relocate(id, timepoint, treat)
 colnames(data)<-to_snake_case(colnames(data))
-genecols<-colnames(data)[15:826] #Before running the next code block, remember to double check that these are the genecolumns
+genecols<-colnames(data)[16:827] #Before running the next code block, remember to double check that these are the genecolumns
 
 ```
 
@@ -64,8 +78,8 @@ genecols<-colnames(data)[15:826] #Before running the next code block, remember t
 
 This for loop is quite intensive, it creates a linear mixed effect model for each gene and creates a log2fold change.
 
-```{r eval = F}
-
+```{r eval = T}
+time1<-Sys.time()
 #Create dataframe to populate:
 
 p_interaction<-rep(NA_real_, length.out = length(genecols))
@@ -76,12 +90,14 @@ sumry_model <- vector('list', length(genecols))
 for (gene in genecols){
   
   lmm<-lmm(formula = reformulate(c("timepoint","treat","treat:timepoint") ,response = gene),
+           repetition = ~timepoint|id,
+           structure = "UN",
               data = data)
-
-  differentialexpression$p_interaction[match(gene,genecols)]<- model.tables(lmm)$p.value[3]
+mt<-model.tables(lmm)
+  differentialexpression$p_interaction[match(gene,genecols)]<- mt$p.value[3]
   differentialexpression$log2fold_difference_between_ex_noex[match(gene,genecols)]   <- 
-    log(sum(model.tables(lmm)$estimate[1:3])/
-        sum(model.tables(lmm)$estimate[1:2]),
+    log(sum(mt$estimate[1:3])/
+        sum(mt$estimate[1:2]),
         base = 2)
   sumry_model[[gene]] <- summary(lmm)  
 }
@@ -92,7 +108,7 @@ saveRDS(sumry_model, file = here("Output","DifferentialExpression",
 saveRDS(differentialexpression, file = here("Output","DifferentialExpression",
                                  paste0("DiffExp",
                                         ifelse(PP,"_PP",ifelse(mITT,"_mITT")),".rds")))
-
+time2<-Sys.time()
 #Below is legacy code I used to test out how I would access the estimataes and p-values in the lmm system
 #Test
 #lmm<-lmm(
@@ -147,10 +163,13 @@ differentialexpression<-differentialexpression%>%mutate(
   gene=rownames(differentialexpression),
    log10_P_adjust_FDR = log(p_adjust_FDR ,base=10)
 )
+```
 
+##Volcano Plots
 
-
-volcano_plot<- differentialexpression%>%ggplot(aes(
+```{r}
+volcano_plot<- differentialexpression%>%
+  ggplot(aes(
   x=log2fold_difference_between_ex_noex, 
   y=-log10_P_Interact,
   color = significance,
@@ -182,12 +201,807 @@ volcano_plot_adj #This plot is a bit boring, but more true, most of what happens
 
 ```
 
-# Negative Binomial Regression
-
-# Principal component analysis
-
-Linear mixed model on principle components instead?
+# Log Count Gene expression on Log_Counts
 
 ```{r}
 
+log_data<-
+  data|>
+  mutate(across(genecols, .fns=log2))
 ```
+
+This for loop is quite intensive, it creates a linear mixed effect model for each gene and creates a log2fold change.
+
+```{r eval =T}
+time3<-Sys.time()
+
+#Before running the next code block, remember to double check that these are the genecolumns
+#Create dataframe to populate:
+
+p_interaction<-rep(NA_real_, length.out = length(genecols))
+log2fold_difference_between_ex_noex<-rep(NA_real_, length.out = length(genecols))
+log2differentialexpression<-data.frame(p_interaction, log2fold_difference_between_ex_noex, row.names = genecols)
+log2sumry_model <- vector('list', length(genecols))
+
+
+ 
+
+for (gene in genecols){
+  
+  lmm<-lmm(formula = reformulate(c("timepoint","timepoint:treat"),
+                               response = gene),
+         repetition = ~timepoint|id,
+         structure = "UN",
+              data = log_data)
+mt<-model.tables(lmm)
+  log2differentialexpression$p_interaction[match(gene,genecols)]<- 
+    mt$p.value[3]
+  log2differentialexpression$log2fold_difference_between_ex_noex[match(gene,genecols)]<- 
+    mt$estimate[3]
+  log2sumry_model[[gene]] <- summary(lmm)  
+}
+
+saveRDS(log2sumry_model, file = here("Output",
+                                 "DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "Summary_LMM_log2_Genes.rds"))
+saveRDS(log2differentialexpression, file = here("Output","DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "log2_DiffExp.rds"))
+
+time4<-Sys.time()
+#Below is legacy code I used to test out how I would access the estimataes and p-values in the lmm system
+#Test
+#lmm<-lmm(
+#  formula = A2M ~ timepoint+treat+treat:timepoint,
+#  repetition = ~timepoint|id,
+#  structure = "UN",
+#  data = data
+#)
+
+#model.tables(lmm)
+#sum(model.tables(lmm)$estimate[1:2])/sum(model.tables(lmm)$estimate[1:3])
+
+#effects(lmm, type = "difference", variable = "treat")
+
+#effects(lmm, type = "difference", variable = "timepoint",
+#conditional = c("treat"), repetition = "Followup")
+
+```
+
+## Shortcut_Log
+
+```{r}
+
+log2sumry_model<-readRDS(file = here("Output",
+                                 "DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "Summary_LMM_log2_Genes.rds"))
+
+
+log2differentialexpression <- readRDS( file = here("Output","DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "log2_DiffExp.rds"))
+
+
+#p.adjust(p, method = p.adjust.methods, n = length(p))
+```
+
+##Log_Adjust_p_values (FDR)
+
+```{r}
+cut_off<- -log(0.05, base=10)
+
+log2differentialexpression <- 
+  log2differentialexpression|>
+  mutate(
+  p_adjust_FDR = p.adjust(p_interaction, method = "fdr"),
+  log10_P_Interact = log(p_interaction ,base=10),
+  significance = 
+    factor(case_when(
+    log10_P_Interact <= 
+      -cut_off ~ "significant",
+             T ~ "non-significant"
+  ), levels = c ("significant", "non-significant")),
+  gene=rownames(differentialexpression),
+   log10_P_adjust_FDR = log(p_adjust_FDR ,base=10))
+ 
+#As all these are the same value, I assume there is no meaningful difference. Maybe I should have done a poisson regression ??
+```
+
+##Log_Volcano_Plot
+
+```{r}
+
+
+log2_volcano_plot<- log2differentialexpression%>%
+  ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_Interact,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+log2_volcano_plot
+
+library(plotly)
+log2_volcano_plot
+ggplotly(log2_volcano_plot)
+#This volcanoplot plots the log2fold ratio in genes at followup between exercise and control (so exercise divided by control) against the uncorrected p-value of the difference. It used normalized gene counts by the Nanostring normalisation, and it used a linear mixed effect model for each gene.
+#Really this plot shows mostly noise, but if I don't show this noise, the 
+
+#I am contemplating fitting a negative binomial model to each gene instead.
+
+log2_volcano_plot_adj<- log2differentialexpression%>%ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_adjust_FDR,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+log2_volcano_plot_adj #This plot is a bit boring, but more true, most of what happens is probably noise.. 
+
+```
+
+# Negative Binomial Regression
+
+Sadly we cannot fit a mixed effect model, but it is probably okay with our baseline constrain.
+
+```{r eval = T}
+time5<-Sys.time()
+
+data_negbin <- data|>
+  mutate(across(genecols, ~round(.x,digits=0)))
+library(MASS)
+negbinmodel<-glm.nb(formula = reformulate(c("timepoint","treat"),
+                               response = genecols[66]),
+       data = data_negbin)
+
+test<-summary(negbinmodel)
+
+p_treat<-rep(NA_real_, length.out = length(genecols))
+log2fold_difference_between_ex_noex<-rep(NA_real_, length.out = length(genecols))
+negative_binom_differentialexpression<-
+  data.frame(p_treat, log2fold_difference_between_ex_noex, row.names = genecols)
+negative_binom_sumry_model <- vector('list', length(genecols))
+
+
+for (gene in genecols){
+  
+  negbinmodel<-glm.nb(formula = reformulate(c("timepoint","treat"),
+                               response = gene),
+       data = data_negbin)
+  sumry<-summary(negbinmodel)
+  negative_binom_differentialexpression$p_treat[match(gene,genecols)]<- 
+    sumry$coefficients[3,4]
+  negative_binom_differentialexpression$log2fold_difference_between_ex_noex[match(gene,genecols)]<- 
+    log2(exp(sumry$coefficients[3,4]))
+  negative_binom_sumry_model[[gene]] <- sumry 
+}
+
+saveRDS(negative_binom_sumry_model, file = here("Output",
+                                 "DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "Summary_NegativeBinomial_Genes.rds"))
+saveRDS(negative_binom_differentialexpression, file = here("Output","DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "NegativeBinomial_DiffExp.rds"))
+
+
+time6<-Sys.time()
+```
+
+## Negative Binomial Adjust p-values (FDR)
+
+```{r}
+
+
+negative_binom_sumry_model<-readRDS(file = here("Output",
+                                 "DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "Summary_NegativeBinomial_Genes.rds"))
+negative_binom_differentialexpression<-readRDS(file = here("Output","DifferentialExpression",
+                                 ifelse(PP,"PP",""),
+                                 "NegativeBinomial_DiffExp.rds"))
+
+
+negative_binom_differentialexpression <- 
+  negative_binom_differentialexpression|>
+  mutate(
+  p_adjust_FDR = p.adjust(p_treat, method = "fdr"),
+  log10_P_Interact = log(p_treat ,base=10),
+  significance = 
+    factor(case_when(
+    log10_P_Interact <= 
+      -cut_off ~ "significant",
+             T ~ "non-significant"
+  ), levels = c ("significant", "non-significant")),
+  gene=rownames(negative_binom_differentialexpression),
+   log10_P_adjust_FDR = log(p_adjust_FDR ,base=10))
+ 
+#As all these are the same value, I assume there is no meaningful difference. This woould have converged to a poisson regression and been true.
+
+
+
+```
+
+## Negative Binomial Volcano Plot
+
+```{r}
+
+
+negbin_volcano_plot<- negative_binom_differentialexpression%>%
+  ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_Interact,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+negbin_volcano_plot
+
+library(plotly)
+ggplotly(negbin_volcano_plot)
+#Oh, yeah, that's how a negative binomial distribution works. Well, that's not useful.
+
+negbin_volcano_plot_adj<- 
+  log2differentialexpression%>%
+  ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_adjust_FDR,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+negbin_volcano_plot_adj #This plot is a bit boring, but more true, most of what happens is probably noise.. 
+
+```
+
+# Differentiated by whether they gained anything from exercise or not
+
+Søren asked for this data, so we'll create the data set like this:
+
+```{r eval =T}
+
+log_data_comparison<-
+  log_data|>
+  mutate(
+      treatment = 
+    factor(case_when(
+      treatment == "Træning" ~ "exercise",
+      treatment == "Kontrol" ~ "control",
+      T ~ treatment), levels = c("control","exercise")),
+    timepoint = factor(to_snake_case(as.character(timepoint))),
+    treat = factor(
+      case_when(
+        timepoint == "baseline" ~ "control",
+        T~treatment
+      )
+    ))
+vo2max.data.wide <- read_excel(path=here("Data",paste0(
+                       "Vo2max.Data.Wide.EasytrialQC_",
+                       ifelse(PP,"PP","mITT"),".xlsx")))
+
+vo2_increase_df <-
+  vo2max.data.wide |>
+  dplyr::filter(
+    treatment == "exercise" 
+  )
+
+mediankondi<-median(vo2_increase_df$delta_kondi, na.rm = T)
+
+vo2_increase_df2<-
+  vo2_increase_df|>
+  mutate(
+    vo2abovemedian = case_when(delta_kondi> mediankondi~T,
+                               delta_kondi< mediankondi~F,
+                               T ~ NA,
+                               )
+  )|>
+  dplyr::filter(
+    !is.na(vo2abovemedian)
+  )|>
+  dplyr::select(
+    id, vo2abovemedian
+  )
+  
+
+log_data_comparison2<- 
+  log_data_comparison|>
+  dplyr::filter(treatment == "exercise")|>
+  left_join(vo2_increase_df2, by = join_by(id))|>
+  dplyr::filter(
+    !is.na(vo2abovemedian)
+  )|>
+  mutate(
+    vo2above_BLconstrain = case_when(
+      timepoint == "baseline" ~ F,
+      T ~ vo2abovemedian
+    )
+  )
+  
+
+
+```
+
+This for loop is quite intensive, it creates a linear mixed effect model for each gene and creates a log2fold change.
+
+```{r eval =F}
+time7<-Sys.time()
+
+p_interaction<-rep(NA_real_, length.out = length(genecols))
+log2fold_difference_between_ex_noex<-rep(NA_real_, length.out = length(genecols))
+comparison_log2differentialexpression<-data.frame(p_interaction, log2fold_difference_between_ex_noex, row.names = genecols)
+comparison_log2sumry_model <- vector('list', length(genecols))
+
+
+
+for (gene in genecols){
+  
+  lmm<-lmm(formula = reformulate(c("timepoint","vo2abovemedian","timepoint:vo2abovemedian"),
+                               response = gene),
+         repetition = ~timepoint|id,
+         structure = "UN",
+              data = log_data_comparison2)
+mt<-model.tables(lmm)
+  comparison_log2differentialexpression$p_interaction[match(gene,genecols)]<- 
+    mt$p.value[4]
+  comparison_log2differentialexpression$log2fold_difference_between_ex_noex[match(gene,genecols)]<- 
+    mt$estimate[4]
+  comparison_log2sumry_model[[gene]] <- summary(lmm)  
+}
+
+saveRDS(comparison_log2sumry_model, file = here("Output",
+                                 "DifferentialExpression",
+                                 ifelse(PP,"PP","mITT"),
+                                 "Comparison_Summary_LMM_log2_Genes.rds"))
+saveRDS(comparison_log2differentialexpression, file = here("Output","DifferentialExpression",
+                                 ifelse(PP,"PP","mITT"),
+                                 "Comparison_log2_DiffExp.rds"))
+
+#Below is legacy code I used to test out how I would access the estimataes and p-values in the lmm system
+#Test
+#lmm<-lmm(
+#  formula = A2M ~ timepoint+treat+treat:timepoint,
+#  repetition = ~timepoint|id,
+#  structure = "UN",
+#  data = data
+#)
+
+#model.tables(lmm)
+#sum(model.tables(lmm)$estimate[1:2])/sum(model.tables(lmm)$estimate[1:3])
+
+#effects(lmm, type = "difference", variable = "treat")
+
+#effects(lmm, type = "difference", variable = "timepoint",
+#conditional = c("treat"), repetition = "Followup")
+
+time8<-Sys.time()
+
+```
+
+## Shortcut_Log_Comparison
+
+```{r}
+
+comparison_log2sumry_model<-
+    readRDS(file = here("Output",
+                                 "DifferentialExpression",
+                                 ifelse(PP,"PP","mITT"),
+                                 "Comparison_Summary_LMM_log2_Genes.rds"))
+
+
+comparison_log2differentialexpression <- 
+    readRDS( file = here("Output","DifferentialExpression",
+                                 ifelse(PP,"PP","mITT"),
+                                 "Comparison_log2_DiffExp.rds"))
+
+
+#p.adjust(p, method = p.adjust.methods, n = length(p))
+```
+
+##Comparison Log_Adjust_p_values (FDR)
+
+```{r}
+comparison_log2differentialexpression <- 
+  comparison_log2differentialexpression|>
+  mutate(
+  p_adjust_FDR = p.adjust(p_interaction, method = "fdr"),
+  log10_P_Interact = log(p_interaction ,base=10),
+  significance = 
+    factor(case_when(
+    log10_P_Interact <= 
+      -cut_off ~ "significant",
+             T ~ "non-significant"
+  ), levels = c ("significant", "non-significant")),
+  gene=rownames(comparison_log2differentialexpression),
+   log10_P_adjust_FDR = log(p_adjust_FDR ,base=10))
+ 
+#As all these are the same value, I assume there is no meaningful difference. Maybe I should have done a poisson regression ??
+```
+
+##Comparison Log2 Volcano Plot
+
+```{r}
+
+
+comparison_log2_volcano_plot<- 
+  comparison_log2differentialexpression%>%
+  ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_Interact,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  labs(y="-log10(p-value)",
+       x="log2 fold difference between exercise responders and non-responders")+
+  theme(legend.position="none")
+
+library(plotly)
+comparison_log2_volcano_plot+
+  geom_label()
+
+ggplotly(comparison_log2_volcano_plot)
+#This volcanoplot plots the log2fold ratio in genes at followup between those who benefit from exercise (by having increase in VO2max above the median) and those who dont (by having an increase in vo2max below the median) against the uncorrected p-value of the difference. It used normalized gene counts by the Nanostring normalisation, and it used a linear mixed effect model for each gene.
+#Really this plot shows mostly noise, but if I don't show this noise, the 
+
+#I am contemplating fitting a negative binomial model to each gene instead.
+
+comparison_log2_volcano_plot_adj<- 
+  comparison_log2differentialexpression%>%
+  ggplot(aes(
+  x=log2fold_difference_between_ex_noex, 
+  y=-log10_P_adjust_FDR,
+  color = significance,
+  label = gene))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=cut_off, linetype="dashed", color = "red")+
+  theme(legend.position="none")
+comparison_log2_volcano_plot_adj #This plot is a bit boring, but more true, most of what happens is probably noise.. 
+
+```
+
+# Multiple Factor Analysis (MFA)
+
+Søren suggested doing Principle Component Analysis (PCA), but we can do MFA on our repeated measures. MFA handles continous values by scaling them and applying PCA,categorical outcomes by Multiple correspondence analysis (MCA). This mixed system is called Factor analysis of mixed data (FAMD)
+
+```{r}
+#install.packages("FactoMineR")
+#install.packages("Factoshiny")
+library(FactoMineR)
+library(Factoshiny)
+#library(renv)
+
+#renv::init()
+#renv::install(c("FactoMineR","Factoshiny"))
+```
+
+## Reorder data set into classes:
+
+FactoMineR wants the classes to be grouped after eachother. So we need to reorder this: The classes we want are: 1. Exposure: \* Timepoint, \* Treatment
+
+2.  Fatigue Outomes \*Fatigue Severity Scale
+
+3.  Vo2Max Outcomes
+
+-   Aerobic Capacity
+
+4.  Gene Groups
+
+-   M.1.2 by chaussabel et al.
+-   M.3.4
+-   M.5.12
+-   IL-6 Jura
+-   Other IL-6 related (if not included above)
+-   TNF
+-   Other genes
+
+```{r}
+vo2max.data.diffex<-
+  read_excel(
+  path = here("Output","VO2maxQC","Data.VO2MAXQC.xlsx"))|>
+  dplyr::select(
+    id, timepoint, aerobiccapacity
+  )
+
+fatigue.data.diffex <- read_excel(path = here("Output",paste0(
+                       "Questionnaires_combined.xlsx")))|>
+  mutate(
+  timepoint = 
+    factor(x= timepoint, levels = c("baseline", 
+                                   "followup",
+                                   "1 month after followup", 
+                                   "2 months after followup",
+                                   "3 months after followup")))|>
+  dplyr::filter(
+    timepoint == "baseline" | timepoint == "followup" 
+  )|>
+  dplyr::select(
+    id, timepoint, fatigue.mean
+  )|>
+  rename(
+    FSS = fatigue.mean
+  )
+
+MFAdata<-
+  data |>
+  select( id,timepoint, treatment, genecols)|>
+  #mutate(timepoint = to_snake_case(timepoint))|>
+  left_join(vo2max.data.diffex, by = join_by(id, timepoint))|>
+  left_join(fatigue.data.diffex, by = join_by(id, timepoint))|>
+  mutate(treatment = factor(case_when(
+    timepoint == "baseline" ~ "control",
+    timepoint == "followup" ~ "exercise"
+  ),
+  levels = c("control","exercise")))|>
+  relocate(id, timepoint, treatment, FSS, aerobiccapacity)
+
+ M1.2 <- #According to Chiche et al.
+    c("CXCL10", 
+           "DDX60", 
+           "EPSTI1", 
+           "HERC5", 
+           "IFI44", 
+           "IFI44L", 
+           "IFIT1", 
+           "IFIT3", 
+           "IFITM3", 
+           "ISG15", 
+           "LAMP3", 
+           "LY6E", 
+           "MX1", 
+           "OAS1", 
+           "OAS2", 
+           "OAS3", 
+           "OASL", 
+           "RSAD2", 
+           "RTP4", 
+           "SERPING1")|>
+   to_snake_case()
+ 
+ M3.4 = c("DDX58",
+           "GBP1",
+           "GBP3",
+           "GBP5",
+           "HERC6",
+           "IFI35",
+           "IFIH1",
+           "IFIT2",
+           "IFIT5",
+           "IFITM1",
+           "LGALS3BP",
+           "PARP9",
+           "PLSCR1",
+           "SOCS1",
+           "STAT1",
+           "STAT2",
+           "ZBP1")|>
+   to_snake_case()
+
+  M5.12 = c("ADAR",
+            "BST2",
+            "GBP2",
+            "IRF9",
+            "ISG20",
+            "SP100",
+            "TRIM21",
+            "TRIM25")|>
+   to_snake_case()
+  
+    IL6_Jura <- 
+      c("Ar",
+        "CREB1",
+        "Foxq1",
+        "RELA")|>
+   to_snake_case()  
+ 
+    
+    IL6 = c("A2M",
+        "ADCY7",
+        #"AER61", #NOT IN DATASET BUT WANTED BY PROTOCL (??),
+        "BRCA2",
+        "PSTK",
+        "ITGAL",
+        "CD70",
+        "CDK9",
+        "FCRL2",
+        "GADD45B",
+        "GRP1",
+        "HSP90AB1",
+        "IER3",
+        "IRAK3",
+        "JDP2",
+        "LRG-1",
+        #"LDB2", #NOT IN DATASET BUT WANTED BY PROTOCL (??),
+        "CCL2", #Known as MCP-1 in protocol
+        "MGP",
+        "PLAUR",
+        "RAG1",
+        #"RAG2", #Downregulated unsure how to include across mean, unless multiplied by -1 (??)
+        "SOCS3",
+        "VEGFA",
+        "STAT3")|>
+   to_snake_case()
+    
+    TNF= c("ADAM17",
+       "ARNT2",
+       "CASP3",
+       "CASP5",
+       "CCR1",
+       "CD22",
+       "GJA3",
+       "GPR35",
+       "TAB3",
+       #"CCL2", #Known as MCP-1 in protocol
+       #"PLAUR", #Downregulated
+       "PPAP2A",
+       "PPP1CA",
+       "SPP1",
+       "SYNGR3")|>
+   to_snake_case()
+  
+ 
+      
+ MFAdata <-
+   MFAdata |>
+   dplyr::select(id, 
+            timepoint, 
+            treatment,
+            FSS,
+            aerobiccapacity,
+            all_of(M1.2), 
+            all_of(M3.4), 
+            all_of(M5.12), 
+            all_of(IL6_Jura), 
+            all_of(IL6), 
+            all_of(TNF))|>
+   relocate(
+      timepoint, 
+            treatment,
+            FSS,
+            aerobiccapacity,
+            all_of(M1.2), 
+            all_of(M3.4), 
+            all_of(M5.12), 
+            all_of(IL6_Jura), 
+            all_of(IL6), 
+            all_of(TNF))
+
+```
+
+## Run the MFA with FactoShiny:
+
+```{r}
+othergenes<-length(genecols) - length(M1.2) - length(M3.4) - length(M5.12) - length(IL6_Jura) -    length(IL6) - length(TNF)
+
+
+MFAdata.scaled<-
+  MFAdata|>
+  mutate(across(where(is.numeric), scale))
+
+#MFAdata.scaled.imputed<-MFAdata.scaled|>
+#  imputeMFA(group = c(2,
+#                1,
+#                1,
+#                length(M1.2),
+#                length(M3.4),
+#                length(M5.12),
+#                length(IL6_Jura),
+#                length(IL6),
+#                length(TNF),
+#                1),
+#      type = c("n",rep("s", 8), "n"),
+#      num.group.sup = c(1, 10),
+#      ncp=6)
+
+
+
+MFA.results2 <- 
+  MFAdata.scaled|>
+  MFA(group = c(2,
+                1,
+                1,
+                length(M1.2),
+                length(M3.4),
+                length(M5.12),
+                length(IL6_Jura),
+                length(IL6),
+                length(TNF),
+                1),
+      type = c("n",rep("s", 8), "n"),
+#      num.group.sup = 89,
+      name.group=c(
+        "measurement.data",
+        "aerobic capacity",
+        "fatigue",
+        "M1.2","M3.4","M5.12","IL6_Jura","IL6","TNF","id"))
+
+summary(MFA.results2)
+
+
+```
+
+## Principal Component Analysis.
+
+Okay, I guess we are trying principal component analysis instead, MFA didn't teach us much.
+
+```{r}
+PCAdata<-MFAdata|>
+  dplyr::relocate(id, timepoint, treatment)
+
+library(missMDA)
+PCAdata.imputed<-
+  PCAdata|>
+  imputePCA(scale.unit =T, method = "Regularized",quali.sup=1:3, quanti.sup=4:5 )
+
+results.pca<-
+  PCAdata.imputed$completeObs|>
+  FactoMineR::PCA(scale.unit =T, quali.sup=1:3, quanti.sup=4:5 )
+
+summary(results.pca)
+results.pca$quali.sup
+
+
+```
+
+Did we learn anything really?
+
+##Hierarchical Clustering on Principal Components
+
+```{r}
+result.mca <- PCAdata.imputed$completeObs|>
+  dplyr::select(-id,-timepoint,-treatment)|>
+  FactoMineR::MCA(ncp=20, graph=T)
+
+
+```
+
+##Hierarchical MFA
+
+```{r}
+HMFAdata.scaled<-MFAdata.scaled
+
+Hierarchy <- list(c(1),
+                  c(2),
+              c(2,
+                length(M1.2),
+                length(M3.4),
+                length(M5.12),
+                length(IL6_Jura),
+                length(IL6),
+                length(TNF)))
+
+length(Hierarchy[[3]])
+
+length_genes<-length(M1.2)+
+                length(M3.4)+
+                length(M5.12)+
+                length(IL6_Jura)+
+                length(IL6)+
+                length(TNF)
+
+HMFA.res<- 
+  HMFAdata.scaled |>
+  relocate(id, treatment, timepoint)|>
+  FactoMineR::HMFA(
+    H = Hierarchy,
+    type = c("n","n", rep("s",length = 7)),
+    graph = T)
+
+HMFA.res.factoshiny<- 
+  HMFAdata.scaled |>
+  Factoshiny()
+```
+
+A Hierarchical MFA might be better?

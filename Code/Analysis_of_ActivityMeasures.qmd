@@ -20,6 +20,13 @@ library(LMMstar)
 set.seed(42069)
 ```
 
+## Choose mITT or PP
+
+```{r}
+mITT = F
+PP = T
+```
+
 ## Load Data
 
 ```{r}
@@ -88,7 +95,7 @@ AX3_group<-AX3_Data.Frame %>%left_join(group_cytokine, by=join_by(id))%>%mutate(
     T~NA_character_
   )
 )%>%relocate(
-  id, treat, timepoint, location, duration_daily_MVPA_pla, m_1_2
+  id, treat, timepoint, location, duration_daily_MVPA_pla, ifn_1_netto
 )
 
 
@@ -117,19 +124,30 @@ summary(model1.MVPA.back.lmm)
 plot(model1.MVPA.back.lmm, type = "scatterplot")
 plot(model1.MVPA.back.lmm, type = "qqplot")
 
-model2.MVPA.back.m12.lmm<-lmm(
-  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.MVPA.back.ifn1.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ 
+    sex+
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    treat:timepoint:ifn_1_netto,
   repetition = ~timepoint|id,
   structure = "UN",
   data = AX3_back
 )
-summary(model2.MVPA.back.m12.lmm)
-plot(model2.MVPA.back.m12.lmm, type = "scatterplot")
-plot(model2.MVPA.back.m12.lmm, type = "qqplot")
+summary(model2.MVPA.back.ifn1.lmm)
+plot(model2.MVPA.back.ifn1.lmm, type = "scatterplot")
+plot(model2.MVPA.back.ifn1.lmm, type = "qqplot")
 
 ## Model with both back and thigh measurements??
 model1.MVPA.backorthigh.lmm<-lmm(
-  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+sex,
+  formula = duration_daily_MVPA_pla ~ 
+    timepoint+
+    treat+
+    treat:timepoint+
+    sex,
   repetition = ~timepoint*location|id,
   structure = "UN",
   data = AX3_group
@@ -139,16 +157,99 @@ summary(model1.MVPA.backorthigh.lmm)
 plot(model1.MVPA.backorthigh.lmm, type = "scatterplot")
 plot(model1.MVPA.backorthigh.lmm, type = "qqplot")
 
-model2.MVPA.backorthigh.m12.lmm<-lmm(
-  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.MVPA.backorthigh.ifn1.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ 
+    sex+
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    treat:timepoint:ifn_1_netto,
   repetition = ~timepoint*location|id,
   structure = "UN",
   data = AX3_group
 )
-summary(model2.MVPA.backorthigh.m12.lmm)
-plot(model2.MVPA.backorthigh.m12.lmm, type = "scatterplot")
-plot(model2.MVPA.backorthigh.m12.lmm, type = "qqplot")
+summary(model2.MVPA.backorthigh.ifn1.lmm)
+plot(model2.MVPA.backorthigh.ifn1.lmm, type = "scatterplot")
+plot(model2.MVPA.backorthigh.ifn1.lmm, type = "qqplot")
 
+```
+
+## PP models
+
+```{r}
+
+if(PP){
+  PP_list <- read_excel(
+    path=here("Output","Compliance.xlsx"))
+  AX3_back <- AX3_back |> 
+    left_join(PP_list)
+  AX3_group <- AX3_group |> 
+    left_join(PP_list)
+
+model1.MVPA.back_PP.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = AX3_back|>
+    dplyr::filter(PP)
+)
+
+summary(model1.MVPA.back_PP.lmm)
+plot(model1.MVPA.back_PP.lmm, type = "scatterplot")
+plot(model1.MVPA.back_PP.lmm, type = "qqplot")
+
+model2.MVPA.back.IFN1_PP.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ 
+    sex+
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    treat:timepoint:ifn_1_netto,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = AX3_back|>
+    dplyr::filter(PP)
+)
+summary(model2.MVPA.back.IFN1_PP.lmm)
+plot(model2.MVPA.back.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.MVPA.back.IFN1_PP.lmm, type = "qqplot")
+
+## Model with both back and thigh measurements??
+model1.MVPA.backorthigh_PP.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint*location|id,
+  structure = "UN",
+  data = AX3_group|>
+    dplyr::filter(PP)
+)
+
+summary(model1.MVPA.backorthigh_PP.lmm)
+plot(model1.MVPA.backorthigh_PP.lmm, type = "scatterplot")
+plot(model1.MVPA.backorthigh_PP.lmm, type = "qqplot")
+
+model2.MVPA.backorthigh.IFN1_PP.lmm<-lmm(
+  formula = duration_daily_MVPA_pla ~ 
+    sex+
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    treat:timepoint:ifn_1_netto,
+  repetition = ~timepoint*location|id,
+  structure = "UN",
+  data = AX3_group|>
+    dplyr::filter(PP)
+)
+summary(model2.MVPA.backorthigh.IFN1_PP.lmm)
+plot(model2.MVPA.backorthigh.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.MVPA.backorthigh.IFN1_PP.lmm, type = "qqplot")
+
+}
 ```
 
 ## Save RDS files of model tables in lists
@@ -156,12 +257,90 @@ plot(model2.MVPA.backorthigh.m12.lmm, type = "qqplot")
 ```{r}
 Activity_lmm_list <- list(
   MVPA_back_main = model.tables(model1.MVPA.back.lmm),
-  MVPA_back_interaction = model.tables(model2.MVPA.back.m12.lmm),
+  MVPA_back_interaction = model.tables(model2.MVPA.back.ifn1.lmm),
   MVPA_backorthigh_main = model.tables(model1.MVPA.backorthigh.lmm),
-  MVPA_backorthigh_interaction = model.tables(model2.MVPA.backorthigh.m12.lmm)
+  MVPA_backorthigh_interaction = model.tables(model2.MVPA.backorthigh.ifn1.lmm)
 
 )
 
 saveRDS(object = Activity_lmm_list,
            file = here("Output","LMMlists","Activity_lmm_list.rds"))
+
+if(PP){
+  
+Activity_lmm_list <- list(
+  MVPA_back_main = model.tables(model1.MVPA.back_PP.lmm),
+  MVPA_back_interaction = model.tables(model2.MVPA.back.IFN1_PP.lmm),
+  MVPA_backorthigh_main = model.tables(model1.MVPA.backorthigh_PP.lmm),
+  MVPA_backorthigh_interaction = model.tables(model2.MVPA.backorthigh.IFN1_PP.lmm)
+
+)
+
+saveRDS(object = Activity_lmm_list,
+           file = here("Output","LMMlists","PP","Activity_lmm_list.rds"))
+}
+```
+
+## Extract GLHT of models
+
+```{r eval =F}
+
+list_exploratory_models <- list(
+  model2.MVPA.back.m12.lmm,
+  model2.MVPA.backorthigh.m12.lmm
+  )
+
+for (model in list_exploratory_models){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "Exploratory"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+
+if(PP){
+  list_exploratory_models_PP <- list(
+  model2.MVPA.back.m12_PP.lmm,
+  model2.MVPA.backorthigh.m12_PP.lmm
+  )
+
+for (model in list_exploratory_models){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "Exploratory"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing","PP",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+}
+```
+
+# The End
+
+```{r}
+print("this is the end of analysis_of_activity measures.qmd")
+if(PP){
+  print("this was a PP analysis")
+}
 ```

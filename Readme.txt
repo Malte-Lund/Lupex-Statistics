@@ -22,21 +22,23 @@ This is the project for statistical analysis of the Type 1 interferon induced ch
 Much of the data is kept with Danish and English intertwined, as such, a non-Danish speaking reader would benefit immensely from having a translator ready or running it through a LLM for translating.
 
 If you want to run this project, the scripts should be run in the following order:
-	1. DataWrangling.qmd
-	2. VO2maxdata.qmd
-	3. Questionnaires.qmd
-	4. CytokineScoreModel.qmd
-	5. DietAnalysis.qmd
-	6. Analysis_of_ActivityMeasures.qmd (not ActivityMeasures.qmd, that is mainly for generating the data from the accelerometer files)
-	7. DifferentialExpression.qmd
-	8. OtherExploratoryOutcomes.qmd
-	9. ModelAggregation.qmd
+	0. 	OPEN THE PROJECT - StatistikLupex.Rproj - Else the Here() function wont work.
+	1. 	DataWrangling.qmd
+	2. 	VO2maxdata.qmd
+	3. 	Questionnaires.qmd
+	4. 	SLEDAI_Analysis.qmd
+	5. 	CytokineScoreModel.qmd
+	6.  	Analysis_of_ActivityMeasures.qmd (not ActivityMeasures.qmd, that is mainly for generating the data from the accelerometer files)
+	7.  	DifferentialExpression.qmd
+	8.  	OtherExploratoryOutcomes.qmd
+	9.  	ModelAggregation.qmd
+	10.	TablesRUs.qmd
 
 This project encompassess the following subfolders:
 
 ~Main/
-	Readme.txt
-	StatistikLupex.Rproj
+	Readme.txt - This file
+	StatistikLupex.Rproj - Start by opening this.
 
 	~/Code/
 		_targets.R - Deprecated, old code, decided not to use targets for this project. Although I probably should have.
@@ -56,6 +58,7 @@ This project encompassess the following subfolders:
 		SimulatedData.qmd
 		SLEDAI_Analysis.qmd
 		Transcriptomics.qmd
+		TablesRUs.qmd
 		UsefulCodes.qmd
 		Verisense-Toolbox-master.zip
 		VO2max_QC.qmd
@@ -71,7 +74,7 @@ This project encompassess the following subfolders:
 
 ~/Documents/
 
-~/Output/
+~/Output/ - Contains most of the output from running the code, but is also used as intermediate storage between the documents so the code can be run in smaller chunks.
 
 ~/Input/
 	~ SF36USPOPMEANSD.xslx - Means and SD for US population for normalizing the SF-36

@@ -192,4 +192,3 @@ delta_crp_m.1.2 <-
         theme_bw()
 delta_crp_m.1.2
 ```
-

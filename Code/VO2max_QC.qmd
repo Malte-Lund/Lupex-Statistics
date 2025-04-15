@@ -32,8 +32,8 @@ library(zoo)
 set.seed(42069)
 here()
 
-mITT =T
-PP=F
+mITT =F
+PP=T
 
 ```
 
@@ -169,7 +169,8 @@ df<-suppressWarnings(
   read_excel( path=p,
                 range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
   filter(!row_number() %in% c(1, 2))%>%
-  as.data.frame()%>%dplyr::select(-contains("...")))
+  as.data.frame()%>%
+    dplyr::select(-contains("...")))
 
 if (is.null(dim(df))|is.na(colnames(df)[1])){next}
 
@@ -376,10 +377,10 @@ if(method == "MLA"){
     
     df.end <- df %>%
       dplyr::filter(
-      time.seconds >= time_vo2max - end.period
-    ) %>% dplyr::filter(
-      time.seconds <= time_vo2max + end.period
-    ) %>% dplyr::filter(
+      time.seconds >= time_vo2max - end.period) %>% 
+      dplyr::filter(
+      time.seconds <= time_vo2max + end.period) %>% 
+      dplyr::filter(
       time.seconds <= test.time
     )
 }
@@ -481,7 +482,9 @@ return(out_data)
 ## Run the function
 
 ```{r}
-data.followup.poole <- getandtestvo2max(Followup.directory, metadata = VO2_metadata, 
+data.followup.poole <- 
+  getandtestvo2max(directory = Followup.directory, 
+                   metadata = VO2_metadata, 
                                         outpath = here("Data","VO2FromR","poole"),
                                         method="poole", graph = T, models = T)
 data.baseline.poole <- getandtestvo2max(Baseline.directory, metadata = VO2_metadata, outpath = here("Data","VO2FromR","poole"),method="poole", graph = T, models = T)
@@ -508,15 +511,76 @@ EasytrialQuality <- VO2_metadata %>%
   rename(       borg_easytrial = borg)%>%left_join(vo2.operator, by = join_by(id,timepoint))
 ```
 
-#Write Data anonymized
+##Manual check of EasyTrial Quality So I went through all of the ones with a NA or False value in the easytrial-quality-test parameter to check whether they were insufficient.
 
 ```{r}
+
 data_vo2max_QC<-
   rbind(data.screening, data.followup, data.baseline)%>%
   dplyr::select(-from_file)%>%left_join(
   EasytrialQuality, by=c("id", "timepoint"))%>%relocate(
     id, timepoint, aerobiccapacity, aerobiccapacity_noted, QualityMeasurementCS, easytrialQualityTest
   )
+
+#So the tests that cannot be gathered from the above are: 
+#Lup010 followup, Lup011 Baseline, Lup015 Baseline, Lup023 Baseline, Lup032 baseline & Lup020 Baseline
+#We can read their data from the easy-trial files, and check whether they had sufficient tests there.
+
+vo2max.data.full <- read_excel(path =  here("Data","vo2max.xlsx"))
+
+vo2max.data.not_auto_read <-
+  vo2max.data.full %>%
+  left_join(data_vo2max_QC%>%
+              dplyr::select(easytrialQualityTest, id, timepoint), 
+            by=join_by(id, timepoint))%>%
+  dplyr::filter(
+    is.na(easytrialQualityTest)
+  )%>%mutate(
+    aerobiccapacity = kondital,
+    easytrialQuality_score = 
+    case_when(
+      grepl("0", er_vo_2_max_nået) ~ 1,
+      T ~ 0
+    ) +
+      case_when(
+      grepl("1", er_vo_2_max_nået) ~ 1,
+      T ~ 0
+    ) +
+      case_when(
+      grepl("late", er_vo_2_max_nået) ~ 1,
+      T ~ 0
+    ),
+    easytrialQualityTest = case_when(
+      easytrialQuality_score > 1 ~ T,
+      T ~ F
+    ))
+
+data_vo2max_QC<-
+  data_vo2max_QC %>%
+  bind_rows(
+    vo2max.data.not_auto_read
+  )
+
+data_vo2max_QC%>%
+  dplyr::filter(!is.na(
+  easytrialQualityTest)
+)%>%
+  dplyr::filter(
+  easytrialQualityTest == F
+)%>%rownames()%>%length()
+
+data_vo2max_QC%>%
+  dplyr::filter(!is.na(
+  easytrialQualityTest)
+)%>%
+  dplyr::filter(
+  easytrialQualityTest
+)%>%rownames()%>%length()
+```
+
+#Write Data anonymized
+
+```{r}
 
 write_xlsx(
   data_vo2max_QC,

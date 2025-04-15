@@ -18,17 +18,16 @@ library(stringr)
 library(writexl)
 library(LMMstar)
 library(plotly)
-#install.packages("targets")
-#library(targets)
-#use_targets()
+library(multcomp)
+library(butils)
 set.seed(42069)
 ```
 
-## Choose mITT or PP (or ITT by leaving both F)
+## Choose mITT or PP
 
 ```{r}
-mITT = T
-PP = F
+mITT = F
+PP = T
 ```
 
 ## Load data
@@ -47,9 +46,9 @@ SLEDAI.data.combined <- SLEDAI.data |>
   left_join(sex.data)|>
   mutate(
     treat = ifelse(timepoint == "baseline", "control", treatment ),
-    m_1_2_quantile_at_baseline = 
-           factor(findInterval(m_1_2, 
-           c(-Inf, quantile(m_1_2, probs=c(0.33, .67), na.rm =T), Inf)),
+    ifn1_quantile_at_baseline = 
+           factor(findInterval(ifn_1_netto, 
+           c(-Inf, quantile(ifn_1_netto, probs=c(0.33, .67), na.rm =T), Inf)),
            labels=c("lowest 33%","33-67%","highest 33%")))|>
   relocate(id, timepoint, treat, treatment, sex
            )
@@ -63,7 +62,7 @@ if (PP){
 }
 ```
 
-##Make the models
+## SLEDAI 6 VAS PHYSICIAN MODELS
 
 ```{r}
 model_secondary3.main.SLEDAI.lmm<-lmm(
@@ -76,22 +75,6 @@ summary(model_secondary3.main.SLEDAI.lmm, level = 0.95)
 plot(model_secondary3.main.SLEDAI.lmm, type=c("qqplot"))
 plot(model_secondary3.main.SLEDAI.lmm, type=c("scatterplot"))
 
-if(PP){
-  SLEDAI.data.combined.PP<-SLEDAI.data.combined|>filter(PP)
-  
-  
-  model_secondary3.mainPP.SLEDAI.lmm<-lmm(
-  formula = SLEDAI_score ~ timepoint+treat:timepoint+sex,
-  repetition = ~timepoint|id,
-  structure = "UN",
-  data = SLEDAI.data.combined.PP
-)
-summary(SLEDAI.data.combined.PP)
-plot(SLEDAI.data.combined.PP, type=c("qqplot"))
-plot(SLEDAI.data.combined.PP, type=c("scatterplot"))
-
-}
-
 model_exploratory1.main.VASphysician.lmm<-lmm(
   formula = vas_sledai_physician ~ timepoint+treat:timepoint+sex,
   repetition = ~timepoint|id,
@@ -103,60 +86,290 @@ plot(model_exploratory1.main.VASphysician.lmm, type=c("qqplot"))
 plot(model_exploratory1.main.VASphysician.lmm, type=c("scatterplot"))
 
 #----------------------------------
-#  Interaction Models:
+#  Interaction Models: mITT
 #----------------------------------
 
-model_secondary4.interaction_m12.SLEDAI.lmm<-lmm(
+model_secondary4.interaction_IFN1.SLEDAI.lmm<-lmm(
   formula = 
-    SLEDAI_score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+    SLEDAI_score ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = SLEDAI.data.combined
 )
 
-summary(model_secondary4.interaction_m12.SLEDAI.lmm, level = 0.95)
+summary(model_secondary4.interaction_IFN1.SLEDAI.lmm, level = 0.95)
+plot(model_secondary4.interaction_IFN1.SLEDAI.lmm, type=c("qqplot"))
+plot(model_secondary4.interaction_IFN1.SLEDAI.lmm, type=c("scatterplot"))
 
+
+
+model_exploratory1.interaction_IFN1.VASphysician.lmm<-lmm(
+  formula = vas_sledai_physician ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = SLEDAI.data.combined
+)
+
+summary(model_exploratory1.interaction_IFN1.VASphysician.lmm, level = 0.95)
+plot(model_exploratory1.main.VASphysician.lmm, type=c("qqplot"))
+plot(model_exploratory1.main.VASphysician.lmm, type=c("scatterplot"))
+
+plot(model_exploratory1.interaction_IFN1.VASphysician.lmm, 
+     type = "fit", color = "treatment", obs.alpha = 0.25, ci = F)
+
+
+plot(model_exploratory1.interaction_IFN1.VASphysician.lmm, 
+     type = "fit", color = "treat", obs.alpha = 0.25, ci = F,
+     time.var = "ifn_1_netto")
+
+
+plot(model_secondary4.interaction_IFN1.SLEDAI.lmm, 
+     type = "fit", color = "treat", obs.alpha = 0.25, ci = F,
+     time.var = "ifn_1_netto")
+
+new_data <-
+  data.frame(
+    ifn_1_netto= quantile(SLEDAI.data.combined$ifn_1_netto, na.rm = T)
+  )
+
+plot(model_exploratory1.interaction_IFN1.VASphysician.lmm, 
+     type = "fit", color = "treatment", obs.alpha = 0.25, ci = F,
+     time.var = "timepoint", facet = ~ cut_interval(ifn_1_netto, 3))
+
+plot(model_secondary4.interaction_IFN1.SLEDAI.lmm, 
+     type = "fit", color = "treatment", obs.alpha = 0.25, ci = F,
+     time.var = "timepoint", facet = ~ cut_interval(ifn_1_netto, 3))
+```
+
+### PP Analysis
+
+```{r eval = PP}
 
 if(PP){
-model_secondary4.interaction_m12_PP.SLEDAI.lmm<-lmm(
+  SLEDAI.data.combined.PP<-
+    SLEDAI.data.combined|>
+    filter(PP)
+  
+  
+  model_secondary3.main.SLEDAI_PP.lmm<-lmm(
+  formula = SLEDAI_score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = SLEDAI.data.combined.PP
+)
+summary(model_secondary3.main.SLEDAI_PP.lmm)
+plot(model_secondary3.main.SLEDAI_PP.lmm, type=c("qqplot"))
+plot(model_secondary3.main.SLEDAI_PP.lmm, type=c("scatterplot"))
+
+
+model_exploratory1.main.VASphysician_PP.lmm<-lmm(
+  formula = vas_sledai_physician ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = SLEDAI.data.combined.PP
+)
+summary(model_exploratory1.main.VASphysician_PP.lmm, level = 0.95)
+plot(model_exploratory1.main.VASphysician_PP.lmm, type=c("qqplot"))
+plot(model_exploratory1.main.VASphysician_PP.lmm, type=c("scatterplot"))
+
+
+#----------------------------------
+#  Interaction Models:
+#----------------------------------
+
+model_secondary4.interaction_IFN1.SLEDAI_PP.lmm<-lmm(
   formula = 
-    SLEDAI_score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+    SLEDAI_score ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = SLEDAI.data.combined.PP
 )
 
-summary(model_secondary4.interaction_m12_PP.SLEDAI.lmm, level = 0.95)
-}
+summary(model_secondary4.interaction_IFN1.SLEDAI_PP.lmm, level = 0.95)
+plot(model_secondary4.interaction_IFN1.SLEDAI_PP.lmm, type=c("qqplot"))
+plot(model_secondary4.interaction_IFN1.SLEDAI_PP.lmm, type=c("scatterplot"))
 
-model_exploratory1.interaction_m_1_2.VASphysician.lmm<-lmm(
-  formula = vas_sledai_physician ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model_exploratory1.interaction_IFN1.VASphysician_PP.lmm<-lmm(
+  formula = vas_sledai_physician ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
-  data = SLEDAI.data.combined
+  data = SLEDAI.data.combined.PP
 )
 
-summary(model_exploratory1.interaction_m_1_2.VASphysician.lmm, level = 0.95)
-plot(model_exploratory1.interaction_m_1_2.VASphysician.lmm, 
+
+
+summary(model_exploratory1.interaction_IFN1.VASphysician_PP.lmm, level = 0.95)
+plot(model_exploratory1.interaction_IFN1.VASphysician_PP.lmm, 
      type = "fit", color = "treatment", obs.alpha = 0.25, ci = F)
 
-plot(model_exploratory1.interaction_m_1_2.VASphysician.lmm, 
-     type = "fit", color = "treat", obs.alpha = 0.25, ci = F,
-     time.var = "m_1_2")
+plot(model_exploratory1.interaction_IFN1.VASphysician_PP.lmm, 
+     type = "qqplot")
+
+plot(model_exploratory1.interaction_IFN1.VASphysician_PP.lmm, type=c("scatterplot"))
+
+plot(model_exploratory1.main.VASphysician_PP.lmm, 
+     type = "fit", color = "treatment", obs.alpha = 0.25, ci = F)
+
+plot(model_exploratory1.main.VASphysician_PP.lmm, 
+     type = "qqplot")
+
+plot(model_exploratory1.main.VASphysician_PP.lmm, type=c("scatterplot"))
 
 
-plot(model_secondary4.interaction_m12.SLEDAI.lmm, 
-     type = "fit", color = "treat", obs.alpha = 0.25, ci = F,
-     time.var = "m_1_2")
 
-plot(model_exploratory1.interaction_m_1_2.VASphysician.lmm, 
-     type = "fit", color = "treatment", obs.alpha = 0.25, ci = F,
-     time.var = "timepoint", facet = ~ cut_interval(m_1_2, 3))
+}
 
 
 ```
 
-### Save Modeltabels for aggregation in other file
+## Contrast Analysis Using GLHT
+
+Deprecated, the model from the SAP includes the relevant contrasts
+
+```{r eval = F}
+
+
+Cont_vec <-
+  rbind(
+    c( #At Baseline
+      1, #(Intercept)	
+      0, #timepointfollowup	
+      1, #m_1_2	
+      1, #sexM	
+      0, #timepointfollowup:treatexercise	
+      0, #timepointfollowup:treatcontrol:m_1_2	
+      0  #timepointfollowup:treatexercise:m_1_2
+    ),
+    c(   #Control at FU
+      1, #(Intercept)	 
+      1, #timepointfollowup	
+      1, #m_1_2	
+      1, #sexM	
+      0, #timepointfollowup:treatexercise	
+      1, #timepointfollowup:treatcontrol:m_1_2	
+      0  #timepointfollowup:treatexercise:m_1_2
+    ),
+    c(   #Exercise at FU
+      1, #(Intercept)	 
+      1, #timepointfollowup	
+      1, #m_1_2	
+      1, #sexM	
+      1, #timepointfollowup:treatexercise	
+      0, #timepointfollowup:treatcontrol:m_1_2	
+      1  #timepointfollowup:treatexercise:m_1_2
+    ),
+    c(   #Exercise_FU minus Control_FU
+      1-1, #(Intercept)	 
+      1-1, #timepointfollowup	
+      1-1, #m_1_2	
+      1-1, #sexM	
+      1-0, #timepointfollowup:treatexercise	
+      0-1, #timepointfollowup:treatcontrol:m_1_2	
+      1-0  #timepointfollowup:treatexercise:m_1_2
+    ),
+    c(   #Difference in M_1_2 interaction
+      1-1, #(Intercept)	 
+      1-1, #timepointfollowup	
+      1-1, #m_1_2	
+      1-1, #sexM	
+      1-1, #timepointfollowup:treatexercise	
+      0-1, #timepointfollowup:treatcontrol:m_1_2	
+      1-0  #timepointfollowup:treatexercise:m_1_2
+      ))
+	
+rownames(Cont_vec) <- c("Baseline",
+                        "Control_FU",
+                        "Exercise_FU", 
+                        "Exercise_FU minus Control_FU", 
+                        "Difference in M_1_2 interaction exercise minus control")
+
+#SLEDAI (secondary outcomes)
+SLEDAI <- 
+  model_secondary4.interaction_m12.SLEDAI.lmm|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model_secondary4.interaction_m12.SLEDAI.lmm$outcome[1]),
+    outcome_priority = "Secondary"
+  )
+SLEDAI|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing","SLEDAI_glht_table.rds"))
+
+#VAS_Physician (Exploratory outcomes)
+VASPhysician <- 
+  model_exploratory1.interaction_m_1_2.VASphysician.lmm|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model_exploratory1.interaction_m_1_2.VASphysician.lmm$outcome[1]),
+    outcome_priority = "Exploratory")
+VASPhysician|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing","VASPhysician_glht_table.rds"))
+
+if(PP){
+  #SLEDAI (secondary outcomes)
+SLEDAI <- 
+  model_secondary4.interaction_m12.SLEDAI_PP.lmm|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model_secondary4.interaction_m12.SLEDAI_PP.lmm$outcome[1]),
+    outcome_priority = "Secondary"
+  )
+SLEDAI|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing","PP","SLEDAI_glht_table.rds"))
+
+#VAS_Physician (Exploratory outcomes)
+VASPhysician <- 
+  model_exploratory1.interaction_m_1_2.VASphysician_PP.lmm|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model_exploratory1.interaction_m_1_2.VASphysician_PP.lmm$outcome[1]),
+    outcome_priority = "Exploratory")
+VASPhysician|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing","PP","VASPhysician_glht_table.rds"))
+
+}
+```
+
+## Save Modeltabels for aggregation in other file
 
 ```{r}
 
@@ -165,24 +378,33 @@ plot(model_exploratory1.interaction_m_1_2.VASphysician.lmm,
     SLEDAI_main = 
       model.tables(model_secondary3.main.SLEDAI.lmm),
     SLEDAI_interaction = 
-      model.tables(model_secondary4.interaction_m12.SLEDAI.lmm))
+      model.tables(model_secondary4.interaction_IFN1.SLEDAI.lmm))
   
   VAS_Physician_lmm_list <- 
    list(
      main_VAS_physician = 
        model.tables(model_exploratory1.main.VASphysician.lmm),
      interaction_VAS_physician = 
-       model.tables(model_exploratory1.interaction_m_1_2.VASphysician.lmm))
+       model.tables(model_exploratory1.interaction_IFN1.VASphysician.lmm))
 
 
 if(PP){
   SLEDAI_lmm_list_PP <- 
     list(
-        SLEDAI_main_PP = model.tables(model_secondary3.mainPP.SLEDAI.lmm),
-        SLEDAI_interaction_PP = model.tables(model_secondary4.interaction_m12_PP.SLEDAI.lmm))
+        SLEDAI_main_PP = model.tables(model_secondary3.main.SLEDAI_PP.lmm),
+        SLEDAI_interaction_PP = model.tables(model_secondary4.interaction_IFN1.SLEDAI_PP.lmm))
+  
+  VAS_Physician_lmm_list_PP <- 
+   list(
+     main_VAS_physician = 
+       model.tables(model_exploratory1.main.VASphysician_PP.lmm),
+     interaction_VAS_physician = 
+       model.tables(model_exploratory1.interaction_IFN1.VASphysician_PP.lmm))
   
   saveRDS(object = SLEDAI_lmm_list_PP,
-           file = here("Output","LMMlists","SLEDAI_lmm_list_PP.rds"))
+           file = here("Output","LMMlists","PP","SLEDAI_lmm_list.rds"))
+  saveRDS(object = VAS_Physician_lmm_list_PP,
+           file = here("Output","LMMlists","PP","VAS_Physician_lmm_list.rds"))
   
 }
   
@@ -199,4 +421,8 @@ saveRDS(object = VAS_Physician_lmm_list,
 
 ```{r}
 print("This is the end of SLEDAIanalysis.qmd")
+
+if(PP){
+  print("This was a PP analysis")
+}
 ```

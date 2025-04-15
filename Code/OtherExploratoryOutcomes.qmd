@@ -11,8 +11,6 @@ editor: visual
 
 ```{r}
 library(renv)
-#renv::init()
-#install.packages("readxl")
 library("readxl")
 library(dplyr)
 library(here)
@@ -23,6 +21,8 @@ library(writexl)
 library(LMMstar)
 library(stringr)
 library(lubridate)
+library(multcomp)
+library(butils)
 set.seed(69420)
 
 
@@ -31,8 +31,14 @@ set.seed(69420)
 # Choose PP or mITT
 
 ```{r}
-mITT = T
-PP = F
+mITT = F
+PP = T
+
+if(PP){
+  PP_list <- read_excel(
+    path=here("Output","Compliance.xlsx")
+  )
+}
 ```
 
 # Diet-Analysis
@@ -58,8 +64,8 @@ alcohol_g<-rep(NA_real_, length(files))
 dietaryregistration<-data.frame(id, files, date, timepoint, energy_kJ, fat_g, carbohydrate_g, protein_g, alcohol_g)%>%mutate(
   id = to_snake_case(substr(files, start = 1, stop = 6)),
   timepoint = case_when(
-    substr(files, start = 7, stop = 7) == "a" ~ "Baseline",
-    substr(files, start = 7, stop = 7) == "b" ~ "Followup",
+    substr(files, start = 7, stop = 7) == "a" ~ "baseline",
+    substr(files, start = 7, stop = 7) == "b" ~ "followup",
     T~NA_character_
   ),
   date = str_extract(string=files,pattern="[0-9_-]+(?=\\.xlsx)")%>%str_replace_all(pattern="_",replacement="/"),
@@ -116,12 +122,20 @@ sex.data<-sex.data[!duplicated(sex.data), ]
 
 diet_group<-left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%mutate(
   treat = case_when(
-    timepoint == "Baseline" ~ "control",
-    timepoint == "Followup" ~ treatment,
+    timepoint == "baseline" ~ "control",
+    timepoint == "followup" ~ treatment,
     T~ NA_character_
   ))%>%left_join(sex.data, by=join_by(id))%>%relocate(
     id, sex, treat, timepoint
   )
+
+if(PP){
+  diet_group<-
+    diet_group|>
+    left_join(  PP_list)|>
+    relocate(id,sex,treat,timepoint,PP)
+  
+}
 
 ```
 
@@ -185,67 +199,267 @@ plot(model1.alcohol.lmm, type = "qqplot")
 
 ```
 
-##Models with m_1_2 interaction
+## Models with IFN1 interaction
 
 ```{r}
 
-model2.energy.m12.lmm<-lmm(
-  formula = Energy_kJ_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.energy.IFN1.lmm<-lmm(
+  formula = Energy_kJ_mean ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
 )
-summary(model2.energy.m12.lmm)
-plot(model2.energy.m12.lmm, type = "scatterplot")
-plot(model2.energy.m12.lmm, type = "qqplot")
+summary(model2.energy.IFN1.lmm)
+plot(model2.energy.IFN1.lmm, type = "scatterplot")
+plot(model2.energy.IFN1.lmm, type = "qqplot")
 #anova(model1.energy.lmm)
 
-model2.fat.m12.lmm<-lmm(
-  formula = fat_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.fat.IFN1.lmm<-lmm(
+  formula = fat_g_mean ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
 )
-summary(model2.fat.m12.lmm)
-plot(model2.fat.m12.lmm, type = "scatterplot")
-plot(model2.fat.m12.lmm, type = "qqplot")
-#anova(model2.fat.m12.lmm)
+summary(model2.fat.IFN1.lmm)
+plot(model2.fat.IFN1.lmm, type = "scatterplot")
+plot(model2.fat.IFN1.lmm, type = "qqplot")
+#anova(model2.fat.IFN1.lmm)
 
-model2.carb.m12.lmm<-lmm(
-  formula = carbohydrate_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.carb.IFN1.lmm<-lmm(
+  formula = carbohydrate_g_mean ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
 )
-summary(model2.carb.m12.lmm)
-plot(model2.carb.m12.lmm, type = "scatterplot")
-plot(model2.carb.m12.lmm, type = "qqplot")
-#anova(model2.carb.m12.lmm) 
+summary(model2.carb.IFN1.lmm)
+plot(model2.carb.IFN1.lmm, type = "scatterplot")
+plot(model2.carb.IFN1.lmm, type = "qqplot")
+#anova(model2.carb.IFN1.lmm) 
 
-model2.protein.m12.lmm<-lmm(
-  formula = protein_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.protein.IFN1.lmm<-lmm(
+  formula = protein_g_mean ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
 )
-summary(model2.protein.m12.lmm)
-plot(model2.protein.m12.lmm, type = "scatterplot")
-plot(model2.protein.m12.lmm, type = "qqplot")
+summary(model2.protein.IFN1.lmm)
+plot(model2.protein.IFN1.lmm, type = "scatterplot")
+plot(model2.protein.IFN1.lmm, type = "qqplot")
 #anova(model1.protein.lmm)
 
-model2.alcohol.m12.lmm<-lmm(
-  formula = alcohol_g_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.alcohol.IFN1.lmm<-lmm(
+  formula = alcohol_g_mean ~ 
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
 )
-summary(model2.alcohol.m12.lmm)
-plot(model2.alcohol.m12.lmm, type = "scatterplot")
-plot(model2.alcohol.m12.lmm, type = "qqplot")
-#anova(model2.alcohol.m12.lmm)
+summary(model2.alcohol.IFN1.lmm)
+plot(model2.alcohol.IFN1.lmm, type = "scatterplot")
+plot(model2.alcohol.IFN1.lmm, type = "qqplot")
+#anova(model2.alcohol.IFN1.lmm)
 ```
 
-## Analysis of Body Composition Changes
+### PP Models
+
+```{r}
+if(PP){
+model1.energy_PP.lmm<-lmm(
+  formula = Energy_kJ_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP))
+summary(model1.energy_PP.lmm)
+plot(model1.energy_PP.lmm, type = "scatterplot")
+plot(model1.energy_PP.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model1.fat_PP.lmm<-lmm(
+  formula = fat_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model1.fat_PP.lmm)
+plot(model1.fat_PP.lmm, type = "scatterplot")
+plot(model1.fat_PP.lmm, type = "qqplot")
+#anova(model1.fat.lmm)
+
+model1.carb_PP.lmm<-lmm(
+  formula = carbohydrate_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model1.carb_PP.lmm)
+plot(model1.carb_PP.lmm, type = "scatterplot")
+plot(model1.carb_PP.lmm, type = "qqplot")
+#anova(model1.carb.lmm) 
+
+model1.protein_PP.lmm<-lmm(
+  formula = protein_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model1.protein_PP.lmm)
+plot(model1.protein_PP.lmm, type = "scatterplot")
+plot(model1.protein_PP.lmm, type = "qqplot")
+#anova(model1.protein.lmm)
+
+model1.alcohol_PP.lmm<-lmm(
+  formula = alcohol_g_mean ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model1.alcohol_PP.lmm)
+plot(model1.alcohol_PP.lmm, type = "scatterplot")
+plot(model1.alcohol_PP.lmm, type = "qqplot")
+#anova(model1.alcohol.lmm)
+
+
+model2.energy.IFN1_PP.lmm<-lmm(
+  formula = Energy_kJ_mean ~ 
+    timepoint+
+    treat+
+    treat:timepoint+
+    ifn_1_netto+
+    ifn_1_netto:treat+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model2.energy.IFN1_PP.lmm)
+plot(model2.energy.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.energy.IFN1_PP.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.fat.IFN1_PP.lmm<-lmm(
+  formula = fat_g_mean ~  
+    timepoint+
+    treat+
+    treat:timepoint+
+    ifn_1_netto+
+    ifn_1_netto:treat+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model2.fat.IFN1_PP.lmm)
+plot(model2.fat.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.fat.IFN1_PP.lmm, type = "qqplot")
+#anova(model2.fat.IFN1.lmm)
+
+model2.carb.IFN1_PP.lmm<-lmm(
+  formula = carbohydrate_g_mean ~ 
+     timepoint+
+    treat+
+    treat:timepoint+
+    ifn_1_netto+
+    ifn_1_netto:treat+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model2.carb.IFN1_PP.lmm)
+plot(model2.carb.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.carb.IFN1_PP.lmm, type = "qqplot")
+#anova(model2.carb.IFN1.lmm) 
+
+model2.protein.IFN1_PP.lmm<-lmm(
+  formula = protein_g_mean ~ 
+    timepoint+
+    treat+
+    treat:timepoint+
+    ifn_1_netto+
+    ifn_1_netto:treat+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model2.protein.IFN1_PP.lmm)
+plot(model2.protein.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.protein.IFN1_PP.lmm, type = "qqplot")
+#anova(model1.protein.lmm)
+
+model2.alcohol.IFN1_PP.lmm<-lmm(
+  formula = alcohol_g_mean ~  
+    timepoint+
+    treat+
+    treat:timepoint+
+    ifn_1_netto+
+    ifn_1_netto:treat+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    diet_group|>
+    dplyr::filter(PP)
+)
+summary(model2.alcohol.IFN1_PP.lmm)
+plot(model2.alcohol.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.alcohol.IFN1_PP.lmm, type = "qqplot")
+}
+```
+
+# Analysis of Body Composition Changes
 
 ```{r}
 treat.data <- read_excel(path =  here("Data","vo2max.xlsx"))%>%dplyr::select(
@@ -253,33 +467,16 @@ treat.data <- read_excel(path =  here("Data","vo2max.xlsx"))%>%dplyr::select(
                                                       )
 treat.data<-treat.data[!duplicated(treat.data), ]
 
-anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   paste0("anamnese_og_objektiv_undersøgelse_baseline_followup.",
-                                         ifelse(mITT,"mITT",
-                                          ifelse(PP, "PP","")),".data .xlsx")))%>%
+anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_schemes",                                                   "anamnese_og_objektiv_undersøgelse_baseline_followup.data .xlsx"))%>%
   mutate(timepoint=case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
     task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
      grepl("Baseline",task_name) ~ "baseline"))%>%
-  dplyr::select(id, treatment,sex,timepoint, mITT, PP, 
+  dplyr::select(id, treatment,sex,timepoint, 
                 højde, weight, taljeomkreds, 
                 hvilepuls,
                 etnisk_oprindelse, etnicitet_anden, 
-                systolisk_bt, diastolisk_bt,
-                sle_start_dato,
-                medicin_ændringer_siden_baseline,
-                tidligere_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
-                aktuel_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
-                relevant_hvilket,
-                hvilket_medicin_anden_relevant,
-                hvilket_medicin_anden_relevant_001,
-                hvilket_medicin_002,
-                rituximab, dosis_rtx, seneste_rtx, 
-                cyklofosfamid, dosis_cyclo,senest_cyclo, 
-                andet_medicin, hvilket_andet, dosis_andet,
-                andet_med_2, hvilket_andet_med_2, andet_med_dosis,
-                andet_med_3, hvilket_andet_med_3, dosis_andet_med_3,
-                andet_med_4, hvilket_andet_med_4, dosis_andet_med_4
-                )%>%mutate(
+                systolisk_bt, diastolisk_bt)%>%mutate(
                   height = højde,
   waist_circumference = taljeomkreds,
   resting_pulse=hvilepuls,
@@ -298,7 +495,8 @@ anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_
   ),
   .keep="all")%>%dplyr::select(-c(
     højde, taljeomkreds
-  ))%>%left_join(group_cytokine, by=join_by(id))%>%
+  ))%>%
+  left_join(group_cytokine, by=join_by(id))%>%
   left_join(treat.data, by=join_by(id, sex))%>%
   mutate(
     WHR = waist_circumference/height,
@@ -313,11 +511,11 @@ anthropometric.medicalhistory <- read_excel(path=here("Data/easy_trial_seperate_
 
 ```
 
-##Model on BMI, WHR and Weight
+## Model on BMI, WHR and Weight
 
 ```{r}
 model1.bmi.lmm<-lmm(
-  formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+  formula = bmi ~ timepoint+treat+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = anthropometric.medicalhistory
@@ -327,16 +525,146 @@ plot(model1.bmi.lmm, type = "scatterplot")
 plot(model1.bmi.lmm, type = "qqplot")
 #anova(model1.energy.lmm)
 
-model1.bmi.lmm.m12.lmm<-lmm(
-  formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model2.bmi.lmm.IFN1.lmm<-lmm(
+  formula = bmi ~ 
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = anthropometric.medicalhistory
 )
-summary(model1.bmi.lmm.m12.lmm)
-plot(model1.bmi.lmm.m12.lmm, type = "scatterplot")
-plot(model1.bmi.lmm.m12.lmm, type = "qqplot")
-#anova(model2.fat.m12.lmm)
+summary(model2.bmi.lmm.IFN1.lmm)
+plot(model2.bmi.lmm.IFN1.lmm, type = "scatterplot")
+plot(model2.bmi.lmm.IFN1.lmm, type = "qqplot")
+#anova(model2.fat.IFN1.lmm)
+
+model1.WHR.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.WHR.lmm)
+plot(model1.WHR.lmm, type = "scatterplot")
+plot(model1.WHR.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.WHR.lmm.IFN1.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+ ifn_1_netto+ifn_1_netto:timepoint+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.WHR.lmm.IFN1.lmm)
+plot(model2.WHR.lmm.IFN1.lmm, type = "scatterplot")
+plot(model2.WHR.lmm.IFN1.lmm, type = "qqplot")
+#anova(model2.fat.IFN1.lmm)
+
+model1.weight.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.weight.lmm)
+plot(model1.weight.lmm, type = "scatterplot")
+plot(model1.weight.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.weight.lmm.IFN1.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ ifn_1_netto+ifn_1_netto:timepoint+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.weight.lmm.IFN1.lmm)
+plot(model2.weight.lmm.IFN1.lmm, type = "scatterplot")
+plot(model2.weight.lmm.IFN1.lmm, type = "qqplot")
+#anova(model2.fat.IFN1.lmm)
+
+```
+
+### PP Models
+
+```{r}
+if(PP){
+  
+  anthropometric.medicalhistory<-
+    anthropometric.medicalhistory|>
+    left_join(PP_list)
+  
+model1.bmi_PP.lmm<-lmm(
+  formula = bmi ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory |>dplyr::filter(PP)
+)
+summary(model1.bmi_PP.lmm)
+plot(model1.bmi_PP.lmm, type = "scatterplot")
+plot(model1.bmi_PP.lmm, type = "qqplot")
+#anova(model1.energy_PP.lmm)
+
+model2.bmi.lmm.IFN1_PP.lmm<-lmm(
+  formula = bmi ~ timepoint+treat+treat:timepoint+ ifn_1_netto+ifn_1_netto:timepoint+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory |>dplyr::filter(PP)
+)
+summary(model2.bmi.lmm.IFN1_PP.lmm)
+plot(model2.bmi.lmm.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.bmi.lmm.IFN1_PP.lmm, type = "qqplot")
+#anova(model2.fat.IFN1_PP.lmm)
+
+model1.WHR_PP.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory |>dplyr::filter(PP)
+)
+summary(model1.WHR_PP.lmm)
+plot(model1.WHR_PP.lmm, type = "scatterplot")
+plot(model1.WHR_PP.lmm, type = "qqplot")
+#anova(model1.energy_PP.lmm)
+
+model2.WHR.lmm.IFN1_PP.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+ ifn_1_netto+ifn_1_netto:timepoint+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory |>dplyr::filter(PP)
+)
+summary(model2.WHR.lmm.IFN1_PP.lmm)
+plot(model2.WHR.lmm.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.WHR.lmm.IFN1_PP.lmm, type = "qqplot")
+#anova(model2.fat.IFN1_PP.lmm)
+
+model1.weight_PP.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory |>dplyr::filter(PP)
+)
+summary(model1.weight_PP.lmm)
+plot(model1.weight_PP.lmm, type = "scatterplot")
+plot(model1.weight_PP.lmm, type = "qqplot")
+#anova(model1.energy_PP.lmm)
+
+model2.weight.lmm.IFN1_PP.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ ifn_1_netto+ifn_1_netto:timepoint+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory |>dplyr::filter(PP)
+)
+summary(model2.weight.lmm.IFN1_PP.lmm)
+plot(model2.weight.lmm.IFN1_PP.lmm, type = "scatterplot")
+plot(model2.weight.lmm.IFN1_PP.lmm, type = "qqplot")
+#anova(model2.fat.IFN1_PP.lmm)
+
+}
 ```
 
 # DXA Scans
@@ -399,6 +727,12 @@ dxa.data.needed<-dxa.data.raw|>
 dxa.data <- 
   dxa.metadata |>
   left_join(dxa.data.needed, by = join_by(id, date, sex))
+
+if(PP){
+  dxa.data <- 
+    dxa.data|>
+    left_join(PP_list)
+}
 
 dxa.data|>
   ggplot(aes(
@@ -514,7 +848,13 @@ plot(model.main.androidDXA.lmm, type = "fit",
 
 ```{r}
 model.interaction.adiposeDXA.lmm<-lmm(
-  formula = TotalAdipose_g ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = TotalAdipose_g ~ 
+    timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
@@ -524,20 +864,30 @@ plot(model.interaction.adiposeDXA.lmm, type = "scatterplot")
 plot(model.interaction.adiposeDXA.lmm, type = "qqplot")
 plot(model.interaction.adiposeDXA.lmm, type = 
        "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
-     color = "treatment", facet = ~ cut_interval(m_1_2, 3))
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
 
 model.interaction.adiposeDXA.nosex.lmm<-lmm(
-  formula = TotalAdipose_g ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2,
+  formula = TotalAdipose_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
 )
 plot(model.interaction.adiposeDXA.nosex.lmm, type = 
        "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
-     color = "treatment", facet = ~ cut_interval(m_1_2, 3))
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
 
 model.interaction.adiposepercentageDXA.lmm<-lmm(
-  formula = TotalAdipose_percentage ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = TotalAdipose_percentage ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
@@ -547,11 +897,16 @@ plot(model.interaction.adiposepercentageDXA.lmm, type = "scatterplot")
 plot(model.interaction.adiposepercentageDXA.lmm, type = "qqplot")
 plot(model.interaction.adiposepercentageDXA.lmm, type = 
        "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
-     color = "treatment", facet = ~ cut_interval(m_1_2, 3))
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
 
 
 model.interaction.lean_mass.lmm<-lmm(
-  formula = TotalLean_g ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = TotalLean_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
@@ -561,10 +916,15 @@ plot(model.interaction.lean_mass.lmm, type = "scatterplot")
 plot(model.interaction.lean_mass.lmm, type = "qqplot")
 plot(model.interaction.lean_mass.lmm, type = 
        "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
-     color = "treatment", facet = ~ cut_interval(m_1_2, 3))
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
 
 model.interaction.leg_lean_mass.lmm<-lmm(
-  formula = legs_lean_mass ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = legs_lean_mass ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
@@ -574,11 +934,16 @@ plot(model.interaction.leg_lean_mass.lmm, type = "scatterplot")
 plot(model.interaction.leg_lean_mass.lmm, type = "qqplot")
 plot(model.interaction.leg_lean_mass.lmm, type = 
        "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
-     color = "treatment", facet = ~ cut_interval(m_1_2, 3))
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
 
 
 model.interaction.gyneoidDXA.lmm<-lmm(
-  formula = Total_Adipose_gyneoid_g ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = Total_Adipose_gyneoid_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
@@ -588,10 +953,15 @@ plot(model.interaction.gyneoidDXA.lmm, type = "scatterplot")
 plot(model.interaction.gyneoidDXA.lmm, type = "qqplot")
 plot(model.interaction.gyneoidDXA.lmm, type = 
        "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
-     color = "treatment", facet = ~ cut_interval(m_1_2, 3))
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
 
 model.interaction.androidDXA.lmm<-lmm(
-  formula = Total_Adipose_Android_g ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = Total_Adipose_Android_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = dxa.data
@@ -602,6 +972,207 @@ plot(model.interaction.androidDXA.lmm, type = "qqplot")
 plot(model.interaction.androidDXA.lmm, type = "fit", 
      ci = F, ci.alpha = 0.10, 
      obs.alpha = 0.4, color = "treatment")
+
+```
+
+### PP Models
+
+```{r}
+if(PP){
+model.main.adiposeDXA_PP.lmm<-lmm(
+  formula = TotalAdipose_g ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.main.adiposeDXA_PP.lmm)
+plot(model.main.adiposeDXA_PP.lmm, type = "scatterplot")
+plot(model.main.adiposeDXA_PP.lmm, type = "qqplot")
+plot(model.main.adiposeDXA_PP.lmm, type = "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, color = "treatment")
+
+model.main.adiposepercentageDXA_PP.lmm<-lmm(
+  formula = TotalAdipose_percentage ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.main.adiposepercentageDXA_PP.lmm)
+plot(model.main.adiposepercentageDXA_PP.lmm, type = "scatterplot")
+plot(model.main.adiposepercentageDXA_PP.lmm, type = "qqplot")
+plot(model.main.adiposepercentageDXA_PP.lmm, type = "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, color = "treatment")
+
+
+model.main.lean_mass_PP.lmm<-lmm(
+  formula = TotalLean_g ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.main.lean_mass_PP.lmm)
+plot(model.main.lean_mass_PP.lmm, type = "scatterplot")
+plot(model.main.lean_mass_PP.lmm, type = "qqplot")
+
+model.main.leg_lean_mass_PP.lmm<-lmm(
+  formula = legs_lean_mass ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.main.leg_lean_mass_PP.lmm)
+plot(model.main.leg_lean_mass_PP.lmm, type = "scatterplot")
+plot(model.main.leg_lean_mass_PP.lmm, type = "qqplot")
+
+
+model.main.gyneoidDXA_PP.lmm<-lmm(
+  formula = Total_Adipose_gyneoid_g ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.main.gyneoidDXA_PP.lmm)
+plot(model.main.gyneoidDXA_PP.lmm, type = "scatterplot")
+plot(model.main.gyneoidDXA_PP.lmm, type = "qqplot")
+plot(model.main.gyneoidDXA_PP.lmm, type = "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, color = "treatment")
+
+model.main.androidDXA_PP.lmm<-lmm(
+  formula = Total_Adipose_Android_g ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.main.androidDXA_PP.lmm)
+plot(model.main.androidDXA_PP.lmm, type = "scatterplot")
+plot(model.main.androidDXA_PP.lmm, type = "qqplot")
+plot(model.main.androidDXA_PP.lmm, type = "fit", 
+     ci = F, ci.alpha = 0.10, 
+     obs.alpha = 0.4, color = "treatment")
+
+##########INTERACTION MODELS PP
+model.interaction.adiposeDXA_PP.lmm<-lmm(
+  formula = TotalAdipose_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.interaction.adiposeDXA_PP.lmm)
+plot(model.interaction.adiposeDXA_PP.lmm, type = "scatterplot")
+plot(model.interaction.adiposeDXA_PP.lmm, type = "qqplot")
+plot(model.interaction.adiposeDXA_PP.lmm, type = 
+       "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+
+model.interaction.adiposeDXA.nosex_PP.lmm<-lmm(
+  formula = TotalAdipose_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+plot(model.interaction.adiposeDXA.nosex_PP.lmm, type = 
+       "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+
+model.interaction.adiposepercentageDXA_PP.lmm<-lmm(
+  formula = TotalAdipose_percentage ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.interaction.adiposepercentageDXA_PP.lmm)
+plot(model.interaction.adiposepercentageDXA_PP.lmm, type = "scatterplot")
+plot(model.interaction.adiposepercentageDXA_PP.lmm, type = "qqplot")
+plot(model.interaction.adiposepercentageDXA_PP.lmm, type = 
+       "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+
+
+model.interaction.lean_mass_PP.lmm<-lmm(
+  formula = TotalLean_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.interaction.lean_mass_PP.lmm)
+plot(model.interaction.lean_mass_PP.lmm, type = "scatterplot")
+plot(model.interaction.lean_mass_PP.lmm, type = "qqplot")
+plot(model.interaction.lean_mass_PP.lmm, type = 
+       "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+
+model.interaction.leg_lean_mass_PP.lmm<-lmm(
+  formula = legs_lean_mass ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.interaction.leg_lean_mass_PP.lmm)
+plot(model.interaction.leg_lean_mass_PP.lmm, type = "scatterplot")
+plot(model.interaction.leg_lean_mass_PP.lmm, type = "qqplot")
+plot(model.interaction.leg_lean_mass_PP.lmm, type = 
+       "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+
+
+model.interaction.gyneoidDXA_PP.lmm<-lmm(
+  formula = Total_Adipose_gyneoid_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.interaction.gyneoidDXA_PP.lmm)
+plot(model.interaction.gyneoidDXA_PP.lmm, type = "scatterplot")
+plot(model.interaction.gyneoidDXA_PP.lmm, type = "qqplot")
+plot(model.interaction.gyneoidDXA_PP.lmm, type = 
+       "fit", ci = F, ci.alpha = 0.10, obs.alpha = 0.4, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+
+model.interaction.androidDXA_PP.lmm<-lmm(
+  formula = Total_Adipose_Android_g ~ timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto + 
+    treat:timepoint+
+    treat:timepoint:ifn_1_netto+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = dxa.data |>dplyr::filter(PP)
+)
+summary(model.interaction.androidDXA_PP.lmm)
+plot(model.interaction.androidDXA_PP.lmm, type = "scatterplot")
+plot(model.interaction.androidDXA_PP.lmm, type = "qqplot")
+plot(model.interaction.androidDXA_PP.lmm, type = "fit", 
+     ci = F, ci.alpha = 0.10, 
+     obs.alpha = 0.4, color = "treatment")
+}
 
 ```
 
@@ -623,13 +1194,20 @@ lfu.data <-
              ),
              treat = ifelse(timepoint == "baseline", "control", treatment))
 
-lfu.data
+if(PP){
+  lfu.data<-
+    lfu.data|>
+    left_join(
+      PP_list
+    )
+}
+
 ```
 
 ## Models
 
-
 ### Main effects
+
 ```{r}
 model.main.fvc.lmm<-lmm(
   formula = fvc_rå ~ timepoint+treat:timepoint+sex,
@@ -668,10 +1246,18 @@ plot(model.main.fev1.lmm, type = "fit", ci = F,
      ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex)
 
 ```
+
 ### Interaction effects
+
 ```{r}
 model.interaction.fvc.lmm<-lmm(
-  formula = fvc_rå ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = fvc_rå ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = lfu.data
@@ -680,11 +1266,17 @@ summary(model.interaction.fvc.lmm)
 plot(model.interaction.fvc.lmm, type = "scatterplot")
 plot(model.interaction.fvc.lmm, type = "qqplot")
 plot(model.interaction.fvc.lmm, type = "fit", ci = F, 
-     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(m_1_2, 3))
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
 
 
 model.interaction.dlco.lmm<-lmm(
-  formula = dlc_oc_rå ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = dlc_oc_rå ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = lfu.data
@@ -693,10 +1285,73 @@ summary(model.interaction.dlco.lmm)
 plot(model.interaction.dlco.lmm, type = "scatterplot")
 plot(model.interaction.dlco.lmm, type = "qqplot")
 plot(model.interaction.dlco.lmm, type = "fit", ci = F, 
-     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(m_1_2, 3))
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+model.interaction.pred.dlco.lmm<-lmm(
+  formula = dlc_oc_pred ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data
+)
+summary(model.interaction.pred.dlco.lmm)
+plot(model.interaction.pred.dlco.lmm, type = "scatterplot")
+plot(model.interaction.pred.dlco.lmm, type = "qqplot")
+plot(model.interaction.pred.dlco.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+  
+  model.interaction.kco.lmm<-lmm(
+  formula = kco_rå ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data
+)
+summary(model.interaction.kco.lmm)
+plot(model.interaction.kco.lmm, type = "scatterplot")
+plot(model.interaction.kco.lmm, type = "qqplot")
+plot(model.interaction.kco.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+
+
+model.interaction.pred.KCO.lmm<-lmm(
+  formula = kco_pred ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data
+)
+summary(model.interaction.pred.KCO.lmm)
+plot(model.interaction.pred.KCO.lmm, type = "scatterplot")
+plot(model.interaction.pred.KCO.lmm, type = "qqplot")
+plot(model.interaction.pred.KCO.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
 
 model.interaction.fev1.lmm<-lmm(
-  formula = fev_1 ~ timepoint+m_1_2+treat:timepoint+treat:timepoint:m_1_2+sex,
+  formula = fev_1 ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = lfu.data
@@ -705,8 +1360,196 @@ summary(model.interaction.fev1.lmm)
 plot(model.interaction.fev1.lmm, type = "scatterplot")
 plot(model.interaction.fev1.lmm, type = "qqplot")
 plot(model.interaction.fev1.lmm, type = "fit", ci = F, 
-     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(m_1_2, 3))
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
 
+```
+
+### PP Models
+
+```{r}
+if(PP){
+  
+model.main.fvc_PP.lmm<-lmm(
+  formula = fvc_rå ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.main.fvc_PP.lmm)
+plot(model.main.fvc_PP.lmm, type = "scatterplot")
+plot(model.main.fvc_PP.lmm, type = "qqplot")
+plot(model.main.fvc_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex)
+
+model.main.dlco_PP.lmm<-lmm(
+  formula = dlc_oc_rå ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.main.dlco_PP.lmm)
+plot(model.main.dlco_PP.lmm, type = "scatterplot")
+plot(model.main.dlco_PP.lmm, type = "qqplot")
+plot(model.main.dlco_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex)
+
+model.main.fev1_PP.lmm<-lmm(
+  formula = fev_1 ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.main.fev1_PP.lmm)
+plot(model.main.fev1_PP.lmm, type = "scatterplot")
+plot(model.main.fev1_PP.lmm, type = "qqplot")
+plot(model.main.fev1_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex)
+
+######### Interaction Models PP
+
+model.interaction.fvc_PP.lmm<-lmm(
+  formula = fvc_rå ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.interaction.fvc_PP.lmm)
+plot(model.interaction.fvc_PP.lmm, type = "scatterplot")
+plot(model.interaction.fvc_PP.lmm, type = "qqplot")
+plot(model.interaction.fvc_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+
+model.interaction.dlco_PP.lmm<-lmm(
+  formula = dlc_oc_rå ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.interaction.dlco_PP.lmm)
+plot(model.interaction.dlco_PP.lmm, type = "scatterplot")
+plot(model.interaction.dlco_PP.lmm, type = "qqplot")
+plot(model.interaction.dlco_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+  
+  model.interaction.kco_PP.lmm<-lmm(
+  formula = kco_rå ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.interaction.kco_PP.lmm)
+plot(model.interaction.kco_PP.lmm, type = "scatterplot")
+plot(model.interaction.kco_PP.lmm, type = "qqplot")
+plot(model.interaction.kco_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+
+model.interaction.fev1_PP.lmm<-lmm(
+  formula = fev_1 ~
+   timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = lfu.data |>dplyr::filter(PP)
+)
+summary(model.interaction.fev1_PP.lmm)
+plot(model.interaction.fev1_PP.lmm, type = "scatterplot")
+plot(model.interaction.fev1_PP.lmm, type = "qqplot")
+plot(model.interaction.fev1_PP.lmm, type = "fit", ci = F, 
+     ci.alpha = 0.10, obs.alpha = 0.2, color = "treatment", facet = ~sex+cut_interval(ifn_1_netto, 3))
+
+}
+
+```
+
+## Graphics
+
+```{r}
+lfu.data|>
+  dplyr::filter(timepoint == "baseline")|>
+  ggplot(aes(x = ifn_1_netto, y = dlc_oc_rå, color = sex))+
+  geom_point()+
+    geom_smooth(method = "lm")+
+  labs(
+    x = "IFN\u03B1 score",
+    y = "DLCO raw value")
+  theme_bw()
+  
+  
+lfu.data|>
+  dplyr::filter(timepoint == "baseline")|>
+  ggplot(aes(x = ifn_1_netto, y = kco_rå, color = sex))+
+  geom_point()+
+    geom_smooth(method = "lm")+
+  labs(
+    x = "IFN\u03B1 score",
+    y = "KCO raw value")
+  theme_bw()
+  
+  lfu.data |>
+  dplyr::filter(timepoint == "baseline")|>
+  ggplot(aes(x = ifn_1_netto, y = kco_pred, color = sex))+
+  geom_point()+
+    geom_smooth(method = "lm")+
+  labs(
+    x = "IFN\u03B1 score",
+    y = "KCO % of predicted value")
+  theme_bw() 
+
+lfu.data |>dplyr::filter(PP)|>
+  dplyr::filter(timepoint == "baseline")|>
+  ggplot(aes(x = ifn_1_netto, y = dlc_oc_rå, color = sex))+
+  geom_point()+
+    geom_smooth(method = "lm")+
+  labs(
+    x = "IFN\u03B1 score",
+    y = "DLCO raw value")
+  theme_bw()
+
+lfu.data |>dplyr::filter(PP)|>
+  dplyr::filter(timepoint == "baseline")|>
+  ggplot(aes(x = ifn_1_netto, y = kco_rå, color = sex))+
+  geom_point()+
+    geom_smooth(method = "lm")+
+  labs(
+    x = "IFN\u03B1 score",
+    y = "KCO raw value")
+  theme_bw()
+
+lfu.data |>dplyr::filter(PP)|>
+  dplyr::filter(timepoint == "baseline")|>
+  ggplot(aes(x = ifn_1_netto, y = kco_pred, color = sex))+
+  geom_point()+
+    geom_smooth(method = "lm")+
+  labs(
+    x = "IFN\u03B1 score",
+    y = "KCO % of predicted value")
+  theme_bw()  
+  
 ```
 
 # Export .RDS of models
@@ -734,14 +1577,220 @@ lung_function_models <- list(
   model.interaction.fev1.lmm = model.tables(model.interaction.fev1.lmm)
 )
 
+
+macronutrients_list <- list(
+  energy_main_lmm =
+    model.tables(model1.energy.lmm),
+  energy_interaction_lmm = 
+    model.tables(model2.energy.IFN1.lmm),
+  fat_main_lmm = 
+    model.tables(model1.fat.lmm),
+  fat_interaction_lmm = 
+    model.tables(model2.fat.IFN1.lmm),
+  carb_main_lmm = 
+    model.tables(model1.carb.lmm),
+  carb_interaction_lmm = 
+    model.tables(model2.carb.IFN1.lmm),
+  protein_main_lmm = 
+    model.tables(model1.protein.lmm),
+  protein_interaction_lmm =
+    model.tables(model2.protein.IFN1.lmm),
+  alcohol_main_lmm =
+    model.tables(model1.alcohol.lmm),
+  alcohol_interaction_lmm = 
+    model.tables(model2.alcohol.IFN1.lmm)
+  )
+
+anthropometrics_models <- list(
+  bmi_main_lmm = model.tables(model1.bmi.lmm),
+  bmi_interaction_lmm = model.tables(model2.bmi.lmm.IFN1.lmm),
+  WHR_main_lmm = model.tables(model1.WHR.lmm),
+  WHR_interaction_lmm = model.tables(model2.WHR.lmm.IFN1.lmm),
+  weight_main_lmm = model.tables(model1.weight.lmm),
+  weight_interaction_lmm = model.tables(model2.weight.lmm.IFN1.lmm)
+)
+
+anthropometrics_models|>
+  saveRDS(file = here("Output","LMMlists","anthropometrics_list_lmm.rds"))
+macronutrients_list|>
+    saveRDS(file = here("Output","LMMlists","macronutrients_list_lmm.rds")) 
 saveRDS(object = DXA_models,
          file = here("Output","LMMlists","DXA_model.rds"))
 saveRDS(object = lung_function_models,
         file = here("Output","LMMlists","lung_lmm_list.rds"))
+
+if(PP){
+  
+DXA_models_PP <- list(
+  main_total_adipose_g_PP.lmm = model.tables(model.main.adiposeDXA_PP.lmm),
+  interaction_total_adipose_g_PP.lmm = model.tables(model.interaction.adiposeDXA_PP.lmm),
+  main_total_adipose_percentage_PP.lmm = model.tables(model.main.adiposepercentageDXA_PP.lmm),
+  interaction_total_adipose_percentage_PP.lmm = model.tables(model.interaction.adiposepercentageDXA_PP.lmm),
+  main_total_lean_PP.lmm = model.tables(model.main.lean_mass_PP.lmm),
+  interaction_total_lean_PP.lmm = model.tables(model.interaction.lean_mass_PP.lmm),
+  main_gyneoidDXA_PP.lmm = model.tables(model.main.gyneoidDXA_PP.lmm),
+  main_androidDXA_PP.lmm = model.tables(model.main.androidDXA_PP.lmm),
+  interaction_gyneoidDXA_PP.lmm = model.tables(model.interaction.gyneoidDXA_PP.lmm),
+  interaction_androidDXA_PP.lmm = model.tables(model.interaction.androidDXA_PP.lmm)
+  )
+
+lung_function_models_PP <- list(
+  model.main.fvc_PP.lmm = model.tables(model.main.fvc_PP.lmm), 
+  model.interaction.fvc_PP.lmm = model.tables(model.interaction.fvc_PP.lmm),
+  model.main.dlco_PP.lmm = model.tables(model.main.dlco_PP.lmm),
+  model.interaction.dlco_PP.lmm = model.tables(model.interaction.dlco_PP.lmm),
+  model.main.fev1_PP.lmm = model.tables(model.main.fev1_PP.lmm),
+  model.interaction.fev1_PP.lmm = model.tables(model.interaction.fev1_PP.lmm)
+)
+
+
+
+
+macronutrients_list_PP <- list(
+  energy_main_lmm =
+    model.tables(model1.energy_PP.lmm),
+  energy_interaction_lmm = 
+    model.tables(model2.energy.IFN1_PP.lmm),
+  fat_main_lmm = 
+    model.tables(model1.fat_PP.lmm),
+  fat_interaction_lmm = 
+    model.tables(model2.fat.IFN1_PP.lmm),
+  carb_main_lmm = 
+    model.tables(model1.carb_PP.lmm),
+  carb_interaction_lmm = 
+    model.tables(model2.carb.IFN1_PP.lmm),
+  protein_main_lmm = 
+    model.tables(model1.protein_PP.lmm),
+  protein_interaction_lmm =
+    model.tables(model2.protein.IFN1_PP.lmm),
+  alcohol_main_lmm =
+    model.tables(model1.alcohol_PP.lmm),
+  alcohol_interaction_lmm = 
+    model.tables(model2.alcohol.IFN1_PP.lmm)
+  )
+
+
+anthropometrics_models_PP <- list(
+  bmi_main_lmm = model.tables(model1.bmi_PP.lmm),
+  bmi_interaction_lmm = model.tables(model2.bmi.lmm.IFN1_PP.lmm),
+  WHR_main_lmm = model.tables(model1.WHR_PP.lmm),
+  WHR_interaction_lmm = model.tables(model2.WHR.lmm.IFN1_PP.lmm),
+  weight_main_lmm = model.tables(model1.weight_PP.lmm),
+  weight_interaction_lmm = model.tables(model2.weight.lmm.IFN1_PP.lmm)
+)
+
+macronutrients_list_PP|>
+    saveRDS(
+      file = here("Output","LMMlists","PP","macronutrients_list_lmm.rds")) 
+
+DXA_models_PP|>
+  saveRDS(
+         file = here("Output","LMMlists","PP","DXA_model.rds"))
+lung_function_models_PP|>
+  saveRDS(
+        file = here("Output","LMMlists","PP","lung_lmm_list.rds"))
+
+anthropometrics_models_PP|>
+  saveRDS(
+    file = here("Output","LMMlists","PP","anthropometrics_list_lmm.rds"))
+}
+```
+
+## Generalized Linear Hypothesis Testing
+
+Deprecated since update to the model so the contrast is included as per the SAP.
+
+```{r eval = F}
+
+list_exploratory_models <- list(
+  model.interaction.adiposeDXA.lmm,
+  model.interaction.adiposepercentageDXA.lmm,
+  model.interaction.lean_mass.lmm,
+  model.interaction.gyneoidDXA.lmm,
+  model.interaction.androidDXA.lmm,
+  model.interaction.fvc.lmm,
+  model.interaction.dlco.lmm,
+  model.interaction.fev1.lmm,
+  model2.energy.IFN1.lmm,
+  model2.fat.IFN1.lmm,
+  model2.carb.IFN1.lmm,
+  model2.protein.IFN1.lmm,
+  model2.alcohol.IFN1.lmm,
+  model2.bmi.lmm.IFN1.lmm,
+  model2.WHR.lmm.IFN1.lmm,
+  model2.weight.lmm.IFN1.lmm
+  )
+
+for (model in list_exploratory_models){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "Exploratory"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+
+if(PP){
+  list_exploratory_models_PP <- list(
+  model.interaction.adiposeDXA_PP.lmm,
+  model.interaction.adiposepercentageDXA_PP.lmm,
+  model.interaction.lean_mass_PP.lmm,
+  model.interaction.gyneoidDXA_PP.lmm,
+  model.interaction.androidDXA_PP.lmm,
+  model.interaction.fvc_PP.lmm,
+  model.interaction.dlco_PP.lmm,
+  model.interaction.fev1_PP.lmm,
+  model2.energy.IFN1_PP.lmm,
+  model2.fat.IFN1_PP.lmm,
+  model2.carb.IFN1_PP.lmm,
+  model2.protein.IFN1_PP.lmm,
+  model2.alcohol.IFN1_PP.lmm,
+  model2.bmi.lmm.IFN1_PP.lmm,
+  model2.WHR.lmm.IFN1_PP.lmm,
+  model2.weight.lmm.IFN1_PP.lmm
+  )
+
+for (model in list_exploratory_models_PP){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "exploratory"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing","PP",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+}
+
 ```
 
 # The End
 
 ```{r}
 print("This is the end of OtherExploratoryOutcomes.qmd")
+
+if(PP){
+  print("This was a PP analysis")
+}
+
+library(beepr)
+beepr::beep("complete")
 ```

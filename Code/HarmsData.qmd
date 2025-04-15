@@ -21,9 +21,10 @@ library(stringr)
 library(writexl)
 library(LMMstar)
 library(plotly)
-#install.packages("targets")
-#library(targets)
-#use_targets()
+library(tibble)
+library(flextable)
+
+library(epitools)
 set.seed(42069)
 ```
 
@@ -31,5 +32,366 @@ set.seed(42069)
 
 ```{r}
 
-harms.data<-read_excel(path = here("Data",paste0("SLEDAI.data.xlsx")))
+harms.data<-read_excel(path = here("Data","AE CTC_indført_MLA.xls"))|>
+  rename(
+    id = `ID-nummer`
+  )|>mutate(
+    id = to_snake_case(id)
+  )|>
+  dplyr::filter(
+    !is.na(CTC_Type)
+  )|>
+  dplyr::filter(id !="lup_021")|>
+  dplyr::filter(id !="lup_006")
+
+treat.data<-read_excel(path=here("data","RandomizationKey_Final.xlsx"))%>%
+  dplyr::select(ID,`True Allocation`)%>%
+  rename(treatment=`True Allocation`,
+         id = ID)|>
+  mutate( treatment = case_when( treatment == "Træning" ~ "exercise",
+                                 treatment == "Kontrol" ~ "control",
+                                 T ~ NA_character_),
+          id = to_snake_case(id))|>
+  dplyr::filter(id !="lup_021")|>
+  dplyr::filter(id !="lup_006")
+
+data.harms.treat<-
+  left_join(harms.data, treat.data, by = join_by(id))|>
+  dplyr::filter(!is.na(treatment))
+```
+
+## Create Counts in each group
+
+```{r}
+
+data.harms.treat<-data.harms.treat|>mutate(
+  during_exercise = case_when(grepl(pattern = "træning",task_name)~T,
+                              grepl(pattern = "compliance", task_name) ~ F,
+                              T ~ NA)
+)
+
+##Number of Adverse Events per group
+harms_by_treatment<-
+  data.harms.treat|>
+  count(treatment)|>
+  rename("Adverse Events" = n)
+
+harms_by_treatment_only_calls<-
+  data.harms.treat|>
+  dplyr::filter(!during_exercise)|>
+  count(treatment)|>
+  rename("Adverse Events" = n)
+
+
+data.harms.treat|>count(treatment, during_exercise)
+
+data.harms.treat|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  count(treatment, during_exercise,CTC_gradering_Opdateret_Malte)
+
+data.harms.treat|>count(treatment, during_exercise, `[Relationhændelse]`)
+
+data.harms.treat|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  count(treatment, during_exercise, CTC_Type, CTC_gradering_Opdateret_Malte)|>
+  arrange(desc(CTC_gradering_Opdateret_Malte))
+
+harms_by_category<-data.harms.treat|>
+  ungroup()|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  count(treatment, CTC_group)|>
+  pivot_wider(
+    names_from = treatment,
+    values_from = n
+  )
+
+harms_by_category_only_calls<-data.harms.treat|>
+  ungroup()|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  dplyr::filter(!during_exercise)|>
+  count(treatment, CTC_group)|>
+  pivot_wider(
+    names_from = treatment,
+    values_from = n
+  )
+
+
+CTC_grade_harms_by_category<-data.harms.treat|>
+  ungroup()|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  count(treatment, CTC_group, CTC_gradering_Opdateret_Malte)|>
+  arrange(desc(CTC_gradering_Opdateret_Malte))|>
+  rename(CTC_grade = CTC_gradering_Opdateret_Malte)|>
+  pivot_wider(
+    names_from = treatment,
+    values_from = n
+  )
+
+
+CTC_grade_harms_by_category_Only_calls<-data.harms.treat|>
+  ungroup()|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  dplyr::filter(!during_exercise)|>
+  count(treatment, CTC_group, CTC_gradering_Opdateret_Malte)|>
+  arrange(desc(CTC_gradering_Opdateret_Malte))|>
+  rename(CTC_grade = CTC_gradering_Opdateret_Malte)|>
+  pivot_wider(
+    names_from = treatment,
+    values_from = n
+  )
+
+
+flextable(harms_by_treatment)|>
+   add_footer_lines(
+ values = "Supplemental Figure - Total count of adverse events by randomization \n
+ This method does not take into account that the exercisers were asked for symptoms before, during and after exercise, as well as AEs being noted when exercisers cancelled sessions due to illness, there is a significant bias to having more AEs in this case.")|>
+  save_as_docx( 
+    path = here("Output","Tables",
+                "Supplemental - Rough Counts of AEs per treatment group.docx"))
+
+harms_by_category|>
+flextable()|>
+   add_footer_lines(
+ values = "Supplemental Figure - Total count of adverse events by randomization divided into CTC categories \n
+ This method does not take into account that the exercisers were asked for symptoms before, during and after exercise, as well as AEs being noted when exercisers cancelled sessions due to illness, there is a significant bias to having more AEs in this case.")|>
+  save_as_docx( 
+    path = here("Output","Tables",
+                "Supplemental - Rough Counts of AEs per treatment by category.docx"))
+
+CTC_grade_harms_by_category|>
+flextable()|>
+   add_footer_lines(
+ values = "Supplemental Figure - Total count of adverse events differentiated by CTC grade and category by randomization \n
+ This method does not take into account that the exercisers were asked for symptoms before, during and after exercise, as well as AEs being noted when exercisers cancelled sessions due to illness, there is a significant bias to having more AEs in this case.")|>
+  save_as_docx( 
+    path = here("Output","Tables",
+                "Supplemental - Rough Counts of AEs per treatment group by CTC and category.docx"))
+
+harms_by_treatment_only_calls|>
+  flextable()|>
+   add_footer_lines(
+ values = "Supplemental Figure - Total count of adverse events by randomization \n
+ This method only regards to AEs assessed at week 4, week 8 and followup.")|>
+  save_as_docx( 
+    path = here("Output","Tables",
+                "Supplemental - Rough Counts of AEs per treatment group only on calls.docx"))
+
+harms_by_category_only_calls|>
+flextable()|>
+   add_footer_lines(
+ values = "Supplemental Figure - Total count of adverse events by randomization \n
+ This method only regards to AEs assessed at week 4, week 8 and followup.")|>
+  save_as_docx( 
+    path = here("Output","Tables",
+                "Supplemental - Rough Counts of AEs per treatment by category only on calls.docx"))
+
+CTC_grade_harms_by_category_Only_calls|>
+  flextable()|>
+   add_footer_lines(
+ values = "Supplemental Figure - Total count of adverse events by randomization divided into CTC categories \n
+ This method only regards to AEs assessed at week 4, week 8 and followup")|>
+  save_as_docx( 
+    path = here("Output","Tables",
+                "Supplemental - Rough Counts of AEs per treatment group and category only on calls.docx"))
+
+```
+
+## Make models on Adverse Events
+
+```{r}
+#List any Adverse events, find risk ratio by randomization group
+## Create dataset with only one AE per id
+data.harms.treat.worst.per.id<-
+  data.harms.treat|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  group_by(id)|>
+  dplyr::slice(which.max(CTC_gradering_Opdateret_Malte))|>
+  right_join(treat.data, by = join_by(id, treatment))|>
+  mutate(
+    any_AE = case_when(
+      is.na(CTC_gradering_Opdateret_Malte) ~ F,
+      T ~ T))|>
+    ungroup()|>
+  dplyr::filter(!is.na(id))
+##Create a 2x2 table
+tab<-
+  data.harms.treat.worst.per.id|>
+  count(any_AE,treatment)|>
+  pivot_wider(id_cols = treatment, names_from = any_AE, values_from = n)|>
+  tibble::column_to_rownames("treatment")|>
+  rename("Adverse_Events"= `TRUE`,
+         "No_Adverse_Events" = `FALSE`)
+
+  risk_ratio_any_adverse_event<-
+    epitools::epitab(x = as.matrix(tab) , method="riskratio")
+##Create a Readable Flextable  
+ flex_RR_any_AE<-
+   risk_ratio_any_adverse_event$tab|>
+  as.data.frame()|>
+  round(digits = 3)|>
+    mutate(
+      treatment = c("Control", "Exercise"),
+      total = Adverse_Events + No_Adverse_Events
+    )|>
+    dplyr::select(treatment, Adverse_Events, total, riskratio, lower, upper, p.value)|>
+  flextable::flextable()|>
+   add_footer_lines(
+ values = "Supplemental Table - Risk of one or more adverse events by randomization \n
+ This method does not take into account that the exercisers were asked for symptoms before, during and after exercise, as well as AEs being noted when exercisers cancelled sessions due to illness."
+)
+## Save to Docx
+ flex_RR_any_AE|>
+   flextable::save_as_docx(path=
+                                here("Output", "Tables", "Supplemental RR any AE.docx"))
+  
+ 
+ #List any Adverse events reported during compliance call or on followup, 
+ #find risk ratio by randomization group
+ ## Create dataset with only one AE per id, but only from those reported on calls or followup
+data.harms.treat.onlyoncall.worst.per.id<-
+  data.harms.treat|>
+  dplyr::filter(grepl(pattern = "compliance", task_name))|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte))|>
+  group_by(id)|>
+  dplyr::slice(which.max(CTC_gradering_Opdateret_Malte))|>
+  right_join(treat.data, by = join_by(id, treatment))|>
+  mutate(
+    any_AE = case_when(
+      is.na(CTC_gradering_Opdateret_Malte) ~ F,
+      T ~ T
+    ))|>
+  ungroup()|>
+  dplyr::filter(!is.na(id))
+##Create a 2x2 table
+tab_on_call<-data.harms.treat.onlyoncall.worst.per.id|>
+  count(any_AE,treatment)|>
+  pivot_wider(id_cols = treatment, names_from = any_AE, values_from = n)|>
+  tibble::column_to_rownames("treatment")|>
+  rename("Adverse_Events"= `TRUE`,
+         "No_Adverse_Events" = `FALSE`)
+
+  risk_ratio_any_adverse_event_on_call<-
+    epitools::epitab(
+      x = as.matrix(tab_on_call) , method="riskratio")
+##Create a Readable Flextable 
+flex_RR_any_AE_on_call<-
+  risk_ratio_any_adverse_event_on_call$tab|>
+  as.data.frame()|>
+  round(digits = 3)|>
+    mutate(
+      Treatment = c("Control", "Exercise"),
+      Total = Adverse_Events + No_Adverse_Events
+    )|>
+    dplyr::select(Treatment, Adverse_Events, Total, riskratio, lower, upper, p.value)|>
+  flextable::flextable()|>
+   add_footer_lines(
+ values = "Supplemental Table - Risk of one or more adverse events by randomization \n
+ This method only uses the adverse events reported by either group during the calls made at week 4, week 8 and at followup"
+)
+
+
+ flex_RR_any_AE_on_call|>
+   flextable::save_as_docx(path=
+                                here("Output", "Tables", "Supplemental RR any AE on call.docx"))
+
+ #Only SAE Defined as CTC >= 3
+ ## Create dataset with only one AE per id, but only from those reported on calls or followup
+  data.serious.harms.treat.worst.per.id<-
+  data.harms.treat|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte)) |>
+  dplyr::filter(SAE >= 1) |>
+  group_by(id)|>
+  dplyr::slice(which.max(CTC_gradering_Opdateret_Malte))|>
+  right_join(treat.data, by = join_by(id, treatment))|>
+  mutate(
+    any_SAE = case_when(
+      is.na(CTC_gradering_Opdateret_Malte) ~ F,
+      T ~ T))|>
+    ungroup()|>
+  dplyr::filter(!is.na(id))
+##Create a 2x2 table
+tab_SAE<-
+  data.serious.harms.treat.worst.per.id|>
+  count(any_SAE,treatment)|>
+  pivot_wider(id_cols = treatment, names_from = any_SAE, values_from = n)|>
+  tibble::column_to_rownames("treatment")|>
+  rename("Serious_Adverse_Events"= `TRUE`,
+         "No_Serious_Adverse_Events" = `FALSE`)
+
+  risk_ratio_any_serious_adverse_event<-
+    epitools::epitab(x = as.matrix(tab_SAE) , method="riskratio")
+##Create a Readable Flextable  
+ flex_RR_any_SAE<-
+   risk_ratio_any_serious_adverse_event$tab|>
+  as.data.frame()|>
+  round(digits = 3)|>
+    mutate(
+      treatment = c("Control", "Exercise"),
+      total = Serious_Adverse_Events + No_Serious_Adverse_Events
+    )|>
+    dplyr::select(treatment, Serious_Adverse_Events, total, riskratio, lower, upper, p.value)|>
+  flextable::flextable()|>
+   add_footer_lines(
+ values = "Supplemental Table - Risk of one or more serious adverse events by randomization \n
+ This method does not take into account that the exercisers were asked for symptoms before, during and after exercise, as well as AEs being noted when exercisers cancelled sessions due to illness."
+)
+## Save to Docx
+ flex_RR_any_SAE|>
+   flextable::save_as_docx(path=
+                                here("Output", "Tables", "Supplemental RR any SAE.docx"))
+ 
+#Only SAE, Only Compliance
+   data.serious.harms.treat.worst.per.id.call<-
+  data.harms.treat|>
+  dplyr::filter(grepl(pattern = "compliance", task_name))|>
+  dplyr::filter(!is.na(CTC_gradering_Opdateret_Malte)) |>
+  dplyr::filter(SAE >= 1) |>
+  group_by(id)|>
+  dplyr::slice(which.max(CTC_gradering_Opdateret_Malte))|>
+  right_join(treat.data, by = join_by(id, treatment))|>
+  mutate(
+    any_SAE = case_when(
+      is.na(CTC_gradering_Opdateret_Malte) ~ F,
+      T ~ T))|>
+    ungroup()|>
+  dplyr::filter(!is.na(id))
+##Create a 2x2 table
+tab_SAE_call<-
+  data.serious.harms.treat.worst.per.id.call|>
+  count(any_SAE,treatment)|>
+  pivot_wider(id_cols = treatment, names_from = any_SAE, values_from = n)|>
+  tibble::column_to_rownames("treatment")|>
+  rename("Serious_Adverse_Events"= `TRUE`,
+         "No_Serious_Adverse_Events" = `FALSE`)|>
+  mutate(
+    Serious_Adverse_Events = 
+      case_when(
+      is.na(Serious_Adverse_Events) ~ 0,
+      T~Serious_Adverse_Events
+    ))
+  
+
+  risk_ratio_any_serious_adverse_event_call<-
+    epitools::epitab(x = as.matrix(tab_SAE_call) , method="riskratio")
+##Create a Readable Flextable  
+ flex_RR_call_SAE<-
+   risk_ratio_any_serious_adverse_event_call$tab|>
+  as.data.frame()|>
+  round(digits = 3)|>
+    mutate(
+      treatment = c("Control", "Exercise"),
+      total = Serious_Adverse_Events + No_Serious_Adverse_Events
+    )|>
+    dplyr::select(treatment, Serious_Adverse_Events, total, riskratio, lower, upper, p.value)|>
+  flextable::flextable()|>
+   add_footer_lines(
+ values = "Supplemental Table - Risk of one or more serious adverse events by randomization \n
+ This method only uses the adverse events reported by either group during the calls made at week 4, week 8 and at followup."
+)
+## Save to Docx
+ flex_RR_call_SAE|>
+   flextable::save_as_docx(path=
+                                here("Output", "Tables", "Supplemental RR any SAE on call.docx"))
+ 
+
 ```

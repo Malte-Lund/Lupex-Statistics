@@ -218,19 +218,19 @@ GGIR(mode=1,
 data.in<-here("Data","AX3")
 data.out <- here("Output","AX3")
 overwrite <- TRUE
-here()
+
 source(here("Code","Verisense-Toolbox-master","Verisense_step_algorithm","myscript.R"))
 
 Time1 <- Sys.time()
 GGIR(
   datadir = here("Data","AX3", "Pre Back"),
-  outputdir = here("Output","AX3","Attempt 2"),
+  outputdir = data.out,
   overwrite = overwrite,
   idloc = 5,
   location = "waist",
   chunksize = 1,
   myfun=myfun,
-  do.neishabouricounts = T,
+  do.neishabouricounts = F,
   do.enmo = TRUE,
   acc.metric = "ENMO",
   threshold.lig= 46.9, #from https://cran.r-project.org/web/packages/GGIR/vignettes/CutPoints.html#2_Relevant_arguments_to_use_cut-points_in_GGIR
@@ -243,13 +243,13 @@ Time2-Time1
 
 GGIR(
   datadir = here("Data","AX3", "Pre Thigh"),
-  outputdir = here("Output","AX3","Attempt 2"),
+  outputdir = data.out,
   overwrite = overwrite,
   idloc = 5,
   location = "thigh",
   chunksize = 1,
   myfun=myfun,
-  do.neishabouricounts = T,
+  do.neishabouricounts = F,
   do.enmo = TRUE,
   acc.metric = "ENMO",
   threshold.lig= 26.4 #from https://cran.r-project.org/web/packages/GGIR/vignettes/CutPoints.html#2_Relevant_arguments_to_use_cut-points_in_GGIR
@@ -261,13 +261,13 @@ Time3-Time2
 
 GGIR(
   datadir = here("Data","AX3", "Post Thigh"),
-  outputdir = here("Output","AX3","Attempt 2"),
+  outputdir = data.out,
   overwrite = overwrite,
   idloc = 5,
   location = "thigh",
   chunksize = 1,
   myfun=myfun,
-  do.neishabouricounts = T,
+  do.neishabouricounts = F,
   do.enmo = TRUE,
 acc.metric = "ENMO",
   threshold.lig= 26.4 #from https://cran.r-project.org/web/packages/GGIR/vignettes/CutPoints.html#2_Relevant_arguments_to_use_cut-points_in_GGIR
@@ -279,13 +279,13 @@ Time4-Time3
 
 GGIR(
   datadir = here("Data","AX3", "Post Back"),
-  outputdir = here("Output","AX3","Attempt 2"),
+  outputdir = data.out,
   overwrite = overwrite,
   idloc = 5,
   location = "waist",
   chunksize = 1,
   myfun=myfun,
-  do.neishabouricounts = T,
+  do.neishabouricounts = F,
   do.enmo = TRUE,
   acc.metric = "ENMO",
   threshold.lig= 46.9, #from https://cran.r-project.org/web/packages/GGIR/vignettes/CutPoints.html#2_Relevant_arguments_to_use_cut-points_in_GGIR
@@ -322,7 +322,7 @@ library(actilifecounts)
 Time6 <- Sys.time()
 GGIR(
   datadir = here("Data","AX3", "Pre Thigh"),
-  outputdir = here("Output","AX3","Attempt 2","Neishabouri"),
+  outputdir = here("Output","AX3","Neishabouri"),
   overwrite = F,
   idloc = 5,
   location = "thigh",
@@ -337,7 +337,7 @@ Time7 <- Sys.time()
 
 GGIR(
   datadir = here("Data","AX3", "Post Thigh"),
-  outputdir = here("Output","AX3","Attempt 2","Neishabouri"),
+  outputdir = here("Output","AX3","Neishabouri"),
   overwrite = F,
   idloc = 5,
   location = "thigh",

@@ -7,6 +7,8 @@ editor: visual
 ## Dietary Analysis of LUPEX trial
 
 ```{r}
+
+warning("THIS FILE IS DEPRECATED IT HAS BEEN MOVED TO OtherExploratoryOutcomes.qmd")
 library(renv)
 #renv::init()
 #install.packages("readxl")
@@ -24,6 +26,8 @@ set.seed(69420)
 
 
 ```
+
+THIS FILE IS DEPRECATED IT HAS BEEN MOVED TO OTHER EXPLORATORY ANALYSES
 
 # Load the data
 
@@ -46,8 +50,8 @@ alcohol_g<-rep(NA_real_, length(files))
 dietaryregistration<-data.frame(id, files, date, timepoint, energy_kJ, fat_g, carbohydrate_g, protein_g, alcohol_g)%>%mutate(
   id = to_snake_case(substr(files, start = 1, stop = 6)),
   timepoint = case_when(
-    substr(files, start = 7, stop = 7) == "a" ~ "Baseline",
-    substr(files, start = 7, stop = 7) == "b" ~ "Followup",
+    substr(files, start = 7, stop = 7) == "a" ~ "baseline",
+    substr(files, start = 7, stop = 7) == "b" ~ "followup",
     T~NA_character_
   ),
   date = str_extract(string=files,pattern="[0-9_-]+(?=\\.xlsx)")%>%str_replace_all(pattern="_",replacement="/"),
@@ -112,12 +116,16 @@ sex.data <- read_excel(path =  here("Data","vo2max_mITT.xlsx"))%>%dplyr::select(
                                                       )
 sex.data<-sex.data[!duplicated(sex.data), ]
 
-diet_group<-left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%mutate(
+diet_group<-
+  left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%
+  mutate(
   treat = case_when(
-    timepoint == "Baseline" ~ "control",
-    timepoint == "Followup" ~ treatment,
+    timepoint == "baseline" ~ "control",
+    timepoint == "followup" ~ treatment,
     T~ NA_character_
-  ))%>%left_join(sex.data, by=join_by(id))%>%relocate(
+  ),
+  Energy_kcal_mean = Energy_kJ_mean/4.184
+  )%>%left_join(sex.data, by=join_by(id))%>%relocate(
     id, sex, treat, timepoint
   )
 
@@ -127,7 +135,7 @@ diet_group<-left_join(dietsummaries_loaded,group_cytokine, by=join_by(id))%>%mut
 
 ```{r}
 model1.energy.lmm<-lmm(
-  formula = Energy_kJ_mean ~ timepoint+treat+treat:timepoint+sex,
+  formula = Energy_kcal_mean ~ timepoint+treat+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
@@ -182,13 +190,81 @@ plot(model1.alcohol.lmm, type = "qqplot")
 #anova(model1.alcohol.lmm)
 
 ```
+## Models with IFN-1 interaction
+```{r}
 
-##Models with m_1_2 interaction
+
+model2.energy.ifn1.lmm<-lmm(
+  formula = Energy_kcal_mean ~ 
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_netto + 
+    timepoint:ifn_1_netto+
+    treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.energy.ifn1.lmm)
+plot(model2.energy.ifn1.lmm, type = "scatterplot")
+plot(model2.energy.ifn1.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+model2.fat.ifn1.lmm<-lmm(
+  formula = fat_g_mean ~ timepoint+treat+treat:timepoint+ ifn_1_netto + timepoint:ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.fat.ifn1.lmm)
+plot(model2.fat.ifn1.lmm, type = "scatterplot")
+plot(model2.fat.ifn1.lmm, type = "qqplot")
+#anova(model2.fat.ifn1.lmm)
+
+model2.carb.ifn1.lmm<-lmm(
+  formula = carbohydrate_g_mean ~ timepoint+treat+treat:timepoint+ ifn_1_netto + timepoint:ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.carb.ifn1.lmm)
+plot(model2.carb.ifn1.lmm, type = "scatterplot")
+plot(model2.carb.ifn1.lmm, type = "qqplot")
+#anova(model2.carb.ifn1.lmm) 
+
+model2.protein.ifn1.lmm<-lmm(
+  formula = protein_g_mean ~ timepoint+treat+treat:timepoint+ ifn_1_netto + timepoint:ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.protein.ifn1.lmm)
+plot(model2.protein.ifn1.lmm, type = "scatterplot")
+plot(model2.protein.ifn1.lmm, type = "qqplot")
+#anova(model1.protein.lmm)
+
+model2.alcohol.ifn1.lmm<-lmm(
+  formula = alcohol_g_mean ~ timepoint+treat+treat:timepoint+ ifn_1_netto + timepoint:ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = diet_group
+)
+summary(model2.alcohol.ifn1.lmm)
+plot(model2.alcohol.ifn1.lmm, type = "scatterplot")
+plot(model2.alcohol.ifn1.lmm, type = "qqplot")
+#anova(model2.alcohol.ifn1.lmm)
+
+```
+
+
+
+## Models with m_1_2 interaction
 
 ```{r}
 
 model2.energy.m12.lmm<-lmm(
-  formula = Energy_kJ_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  formula = Energy_kcal_mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = diet_group
@@ -323,16 +399,6 @@ plot(model1.bmi.lmm, type = "scatterplot")
 plot(model1.bmi.lmm, type = "qqplot")
 #anova(model1.energy.lmm)
 
-model2.bmi.lmm.m12.lmm<-lmm(
-  formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
-  repetition = ~timepoint|id,
-  structure = "UN",
-  data = anthropometric.medicalhistory
-)
-summary(model2.bmi.lmm.m12.lmm)
-plot(model2.bmi.lmm.m12.lmm, type = "scatterplot")
-plot(model2.bmi.lmm.m12.lmm, type = "qqplot")
-#anova(model2.fat.m12.lmm)
 
 model1.WHR.lmm<-lmm(
   formula = WHR ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
@@ -345,6 +411,53 @@ plot(model1.WHR.lmm, type = "scatterplot")
 plot(model1.WHR.lmm, type = "qqplot")
 #anova(model1.energy.lmm)
 
+model1.weight.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model1.weight.lmm)
+plot(model1.weight.lmm, type = "scatterplot")
+plot(model1.weight.lmm, type = "qqplot")
+#anova(model1.energy.lmm)
+
+
+model2.WHR.lmm.ifn1.lmm<-lmm(
+  formula = WHR ~ timepoint+treat+treat:timepoint+ ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.WHR.lmm.ifn1.lmm)
+plot(model2.WHR.lmm.ifn1.lmm, type = "scatterplot")
+plot(model2.WHR.lmm.ifn1.lmm, type = "qqplot")
+#anova(model2.fat.ifn1.lmm)
+
+
+
+model2.bmi.lmm.ifn1.lmm<-lmm(
+  formula = bmi ~ timepoint+treat+treat:timepoint+ ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.bmi.lmm.ifn1.lmm)
+plot(model2.bmi.lmm.ifn1.lmm, type = "scatterplot")
+plot(model2.bmi.lmm.ifn1.lmm, type = "qqplot")
+#anova(model2.fat.ifn1.lmm)
+
+model2.weight.lmm.ifn1.lmm<-lmm(
+  formula = weight ~ timepoint+treat+treat:timepoint+ ifn_1_netto+treat:timepoint:ifn_1_netto+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = anthropometric.medicalhistory
+)
+summary(model2.weight.lmm.ifn1.lmm)
+plot(model2.weight.lmm.ifn1.lmm, type = "scatterplot")
+plot(model2.weight.lmm.ifn1.lmm, type = "qqplot")
+#anova(model2.fat.ifn1.lmm)
+
 model2.WHR.lmm.m12.lmm<-lmm(
   formula = WHR ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
@@ -356,16 +469,18 @@ plot(model2.WHR.lmm.m12.lmm, type = "scatterplot")
 plot(model2.WHR.lmm.m12.lmm, type = "qqplot")
 #anova(model2.fat.m12.lmm)
 
-model1.weight.lmm<-lmm(
-  formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+sex,
+
+
+model2.bmi.lmm.m12.lmm<-lmm(
+  formula = bmi ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = anthropometric.medicalhistory
 )
-summary(model1.weight.lmm)
-plot(model1.weight.lmm, type = "scatterplot")
-plot(model1.weight.lmm, type = "qqplot")
-#anova(model1.energy.lmm)
+summary(model2.bmi.lmm.m12.lmm)
+plot(model2.bmi.lmm.m12.lmm, type = "scatterplot")
+plot(model2.bmi.lmm.m12.lmm, type = "qqplot")
+#anova(model2.fat.m12.lmm)
 
 model2.weight.lmm.m12.lmm<-lmm(
   formula = weight ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
@@ -388,23 +503,23 @@ macronutrients_list <- list(
   energy_main_lmm =
     model.tables(model1.energy.lmm),
   energy_interaction_lmm = 
-    model.tables(model2.energy.m12.lmm),
+    model.tables(model2.energy.ifn1.lmm),
   fat_main_lmm = 
     model.tables(model1.fat.lmm),
   fat_interaction_lmm = 
-    model.tables(model2.fat.m12.lmm),
+    model.tables(model2.fat.ifn1.lmm),
   carb_main_lmm = 
     model.tables(model1.carb.lmm),
   carb_interaction_lmm = 
-    model.tables(model2.carb.m12.lmm),
+    model.tables(model2.carb.ifn1.lmm),
   protein_main_lmm = 
     model.tables(model1.protein.lmm),
   protein_interaction_lmm =
-    model.tables(model2.protein.m12.lmm),
+    model.tables(model2.protein.ifn1.lmm),
   alcohol_main_lmm =
     model.tables(model1.alcohol.lmm),
   alcohol_interaction_lmm = 
-    model.tables(model2.alcohol.m12.lmm)
+    model.tables(model2.alcohol.ifn1.lmm)
   )
 
   macronutrients_list|>
@@ -415,15 +530,15 @@ macronutrients_list <- list(
   bmi_main_lmm =
     model.tables(model1.bmi.lmm),
   bmi_interaction_lmm = 
-    model.tables(model2.bmi.lmm.m12.lmm),
+    model.tables(model2.bmi.lmm.ifn1.lmm),
   WHR_main_lmm = 
     model.tables(model1.WHR.lmm),
   WHR_interaction_lmm = 
-    model.tables(model2.WHR.lmm.m12.lmm),
+    model.tables(model2.WHR.lmm.ifn1.lmm),
   weight_main_lmm = 
     model.tables(model1.weight.lmm),
   weight_interaction_lmm = 
-    model.tables(model2.weight.lmm.m12.lmm)
+    model.tables(model2.weight.lmm.ifn1.lmm)
   
   )
 
@@ -453,4 +568,10 @@ summary(model2.weight.lmm.m12.lmm)
 plot(model2.weight.lmm.m12.lmm, type = "scatterplot")
 plot(model2.weight.lmm.m12.lmm, type = "qqplot")
 #anova(model2.fat.m12.lmm)
+```
+
+# The end
+
+```{r}
+print("this is the end of dietanalysis.qmd")
 ```

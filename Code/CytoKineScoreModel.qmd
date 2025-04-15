@@ -28,8 +28,8 @@ set.seed(42069)
 ## Choose mITT or PP
 
 ```{r}
-PP=F
-mITT = T
+PP=T
+mITT = F
 
 if (mITT && PP) {
 warning("Don't set both mITT and PP as true, it will probably default to mITT, but I haven't tested it properly.")}
@@ -45,19 +45,26 @@ cytokine_scores<-read_excel(path=here("output","cytokinescores.xlsx"))%>%mutate(
                          T~1),
              id == "lup_021" ~ 0, #Excluded due to pregnancy
              id == "lup_006" ~ 0, #Excluded due to SLEDAI = 14 at baseline
-            T ~ 1),
-  PP = case_when(
-    #TODO insert list of PP inclusions
-             T ~ 0))
+            T ~ 1))
 
-randomization_key<-read_excel(path=here("data","RandomizationKey_pingvin_søløve.xlsx"))%>%select(ID,Allocation)%>%
-  rename(treatment=Allocation)
+randomization_key<-read_excel(path=here("data","RandomizationKey_Final.xlsx"))%>%
+  dplyr::select(ID,`True Allocation`)%>%
+  rename(treatment=`True Allocation`)%>%
+  mutate( treatment = case_when( treatment == "Træning" ~ "exercise",
+                                 treatment == "Kontrol" ~ "control",
+                                 T ~ NA_character_))
 colnames(randomization_key)<-to_snake_case(colnames(randomization_key))
 randomization_key$id<-to_snake_case(randomization_key$id)
-
+PP_list <- read_excel(
+    path=here("Output","Compliance.xlsx")
+  )
  
 if (PP) {
-cytokine.data.raw<- cytokine_scores %>%left_join(randomization_key)%>%filter(PP == 1) 
+cytokine.data.raw<- 
+  cytokine_scores %>%
+  left_join(randomization_key)%>%
+  left_join(PP_list)%>%
+  filter(PP == T) 
 }
 
 if (mITT){
@@ -74,11 +81,16 @@ sex.data <- read_excel(path =  here("Data",
 
 sex.data<-sex.data[!duplicated(sex.data), ]
 
-cytokine.data<-cytokine.data.raw %>% filter(timepoint!="HealthyControl")%>%left_join(sex.data)%>%mutate(
-  treat = case_when(
-    timepoint == "Baseline" ~ "Pingvin",
-    timepoint == "Followup" ~ treatment,
-    T ~ treatment
+cytokine.data<-
+  cytokine.data.raw |>
+  filter(timepoint !="Extra")%>% 
+  filter(timepoint!="HealthyControl")%>%
+  left_join(sex.data)%>%
+  mutate(
+    treat = case_when(
+      timepoint == "Baseline" ~ "control",
+      timepoint == "Followup" ~ treatment,
+      T ~ treatment
   )
 )
 ```
@@ -86,6 +98,19 @@ cytokine.data<-cytokine.data.raw %>% filter(timepoint!="HealthyControl")%>%left_
 ## Main Model of M.1.2. change due to intervention
 
 ```{r}
+
+model.ifn1.lmm<-lmm(
+  formula = ifn_1_netto ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = cytokine.data
+)
+summary(model.ifn1.lmm)
+plot(model.ifn1.lmm, type = "scatterplot")
+plot(model.ifn1.lmm, type = "qqplot")
+#anova(model1.kondital.lmm)
+effects(model.ifn1.lmm, variable = NULL)
+
 model1.m_1_2.lmm<-lmm(
   formula = m_1_2 ~ timepoint+treat:timepoint+sex,
   repetition = ~timepoint|id,
@@ -131,13 +156,14 @@ summary(model1.lmm)
 list.models[[score]]<-model.tables(model1.lmm)
 plot(model1.lmm, type = "scatterplot")
 plot(model1.lmm, type = "qqplot")
+plot(model1.lmm, type = "fit", at = data.frame(sex = "F"), col = "treatment", ci =F, obs.alpha = 0.25)
 #anova(model1.kondital.lmm)
 #effects(model1.lmm, variable = NULL)
 }
 ```
 
-
 ## Wide data for bland Altman plots
+
 Julie suggested doing bland altman plots on the control group to check for the stability of scores.
 
 ```{r}
@@ -174,7 +200,9 @@ t.test(cytokine.data.wide$tnf_related_Baseline    ,cytokine.data.wide$tnf_relate
 #t.test(cytokine.data.wide$tnf_related_Baseline    ,cytokine.data.wide$tnf_related_Followup    , paired=T)
 
 ```
+
 #Bland Altman plots
+
 ```{r}
 Bland.Altman.m.1.2<- cytokine.data.wide %>%ggplot(aes(x=m_1_2_Baseline,
                                                       y=m_1_2_Followup,
@@ -244,7 +272,7 @@ il_6_change_against_m_1_2<-cytokine.data.wide %>%
 
 il_6_change_against_m_1_2
 
-baseM12.df<-cytokine.data.wide%>%select(id, m_1_2_Baseline)
+baseM12.df<-cytokine.data.wide%>%dplyr::select(id, m_1_2_Baseline)
 
 cytokine.data.m12.locked <- cytokine.data %>% left_join(baseM12.df)
 
@@ -261,4 +289,3 @@ plot(model2.il6related.m1.2baseline, type = "qqplot")
 effects(model2.il6related.m1.2baseline, variable = NULL)
 plot(model2.il6related.m1.2baseline, type = "partial", color = "treatment")
 ```
-

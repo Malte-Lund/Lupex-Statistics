@@ -29,8 +29,8 @@ set.seed(42069)
 ## Choose mITT or PP (or ITT by leaving both F)
 
 ```{r}
-mITT = T
-PP = F
+mITT = F
+PP = T
 ```
 
 ## Load Models
@@ -44,10 +44,6 @@ Primary_outcomes <- list(
   aerobic_capacity_models =  readRDS(file = here("Output","LMMlists","Aerobic_capacity_LMM_List.rds"))
   )
 
-if(PP){
-  print("this is Per Protocol") #TODO Read the PP models as well.
-}
-
 Df.FSS.Main<-Primary_outcomes$fatigue_models$FSS_main|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "FSS",
@@ -57,7 +53,12 @@ Df.FSS.Main<-Primary_outcomes$fatigue_models$FSS_main|>
            Predictor == "timepointfollowup:treatexercise" ~ T,
            T~F
          ),
-         p.adjust_Bonferroni = p.value*2)|>relocate(
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
@@ -67,9 +68,14 @@ Df.FSS.Interaction<-Primary_outcomes$fatigue_models$FSS_interaction|>
          Outcome_Class = "Primary",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F),
-         p.adjust_Bonferroni = p.value*2)|>relocate(
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
@@ -79,10 +85,15 @@ Df.Aerobic.Main<-Primary_outcomes$aerobic_capacity_models$main.aerobic_capacity.
          Outcome_Class = "Primary",
          Model_Type = "Full effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise" ~ T,
+           #Predictor == "timepointfollowup:treatexercise" ~ T,
            T~F
          ),
-         p.adjust_Bonferroni = p.value*2)|>relocate(
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
@@ -92,9 +103,15 @@ Df.Aerobic.Interaction<-Primary_outcomes$aerobic_capacity_models$interaction.aer
          Outcome_Class = "Primary",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F),
-         p.adjust_Bonferroni = p.value*2)|>relocate(
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+  relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
@@ -110,12 +127,118 @@ df.Primary_outcomes <-
 
 ```
 
+#### PP Primary Outcomes
+
+```{r}
+
+if(PP){
+  print("this is Per Protocol")
+  Primary_outcomes_PP <- list(
+  fatigue_models = 
+    readRDS(
+      file = here("Output","LMMlists",
+                  "PP",
+                  "Fatigue_LMM_List.rds")), 
+  aerobic_capacity_models =  
+    readRDS(
+      file = here("Output","LMMlists",
+                  "PP",
+                  "Aerobic_capacity_LMM_List.rds")))
+  
+Df.FSS.Main_PP<-Primary_outcomes_PP$fatigue_models$FSS_main|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "FSS",
+         Outcome_Class = "Primary",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ),
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.FSS.Interaction_PP<-Primary_outcomes_PP$fatigue_models$FSS_interaction|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "FSS",
+         Outcome_Class = "Primary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F),
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Aerobic.Main_PP<-Primary_outcomes_PP$aerobic_capacity_models$main.aerobic_capacity.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Aerobic Capacity (ml/kg/min)",
+         Outcome_Class = "Primary",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ),
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Aerobic.Interaction_PP<-Primary_outcomes_PP$aerobic_capacity_models$interaction.aerobic_capacity.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Aerobic Capacity (ml/kg/min)",
+         Outcome_Class = "Primary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F),
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+df.Primary_outcomes_PP <- 
+  Df.FSS.Main_PP |> 
+  bind_rows(Df.FSS.Interaction_PP)|>
+  bind_rows(Df.Aerobic.Main_PP)|>
+  bind_rows(Df.Aerobic.Interaction_PP)|>
+  mutate(across(.cols=is.numeric, .fns=~round(.x,3))
+  
+
+  )
+}
+
+```
+
 ### Secondary Outcomes
 
 ```{r}
 Secondary_outcomes <- list(
   Sledai_models = readRDS(file = here("Output","LMMlists","SLEDAI_lmm_list.rds")),
   SF_36_models = readRDS(file = here("Output","LMMlists","SF36_lmm_list.rds")))
+
+
+  #mutate(where(In_hypothesis==T), p_adjust)
+ #mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
+
 
 Df.SLEDAI.Main<-Secondary_outcomes$Sledai_models$SLEDAI_main|>
   rownames_to_column(var = "Predictor")|>
@@ -135,12 +258,13 @@ Df.SLEDAI.Interaction<-Secondary_outcomes$Sledai_models$SLEDAI_interaction|>
          Outcome_Class = "Secondary",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.SF_36_physical.Main<-Secondary_outcomes$SF_36_models$main_sf36_physical|>
+Df.SF_36_physical.Main<-
+  Secondary_outcomes$SF_36_models$main_sf36_physical|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SF-36 Physical aggregate score",
          Outcome_Class = "Secondary",
@@ -158,14 +282,14 @@ Df.SF_36_physical.Interaction<-Secondary_outcomes$SF_36_models$interaction_sf36_
          Outcome_Class = "Secondary",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
 Df.SF_36_mental.Main<-Secondary_outcomes$SF_36_models$main_sf36_mental|>
   rownames_to_column(var = "Predictor")|>
-  mutate(Outcome = "SF-36 mental aggregate score",
+  mutate(Outcome = "SF-36 Mental aggregate score",
          Outcome_Class = "Secondary",
          Model_Type = "Full effects",
          In_hypothesis = case_when(
@@ -177,11 +301,11 @@ Df.SF_36_mental.Main<-Secondary_outcomes$SF_36_models$main_sf36_mental|>
 
 Df.SF_36_mental.Interaction<-Secondary_outcomes$SF_36_models$interaction_sf36_mental|>
   rownames_to_column(var = "Predictor")|>
-  mutate(Outcome = "SF-36 mental aggregate score",
+  mutate(Outcome = "SF-36 Mental aggregate score",
          Outcome_Class = "Secondary",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
@@ -194,22 +318,166 @@ df.Secondary_outcomes <-
   bind_rows(Df.SF_36_mental.Main)|>
   bind_rows(Df.SF_36_mental.Interaction)
 
-df.for.p.adjust <- df.Secondary_outcomes |> 
+df.for.p.adjust_main <- 
+  df.Secondary_outcomes |> 
   dplyr::filter(In_hypothesis)|>
-  mutate(p_adjust_fdr = p.adjust(p.value, method = "fdr"))
+  dplyr::filter(Model_Type == "Full effects")|>
+  mutate(p_adjust_fdr_full = p.adjust(p.value, method = "fdr"))
 
-df.Secondary_outcomes<-df.Secondary_outcomes|>
-  left_join(df.for.p.adjust, 
+df.for.p.adjust_interaction <- 
+  df.Secondary_outcomes |> 
+  dplyr::filter(In_hypothesis)|>
+  dplyr::filter(Model_Type == "Interaction effects")|>
+  mutate(p_adjust_fdr_interaction = p.adjust(p.value, method = "fdr"))
+
+df.Secondary_outcomes<-
+  df.Secondary_outcomes|>
+  left_join(df.for.p.adjust_main, 
             by = 
               join_by(Outcome, Outcome_Class, Predictor, 
                       estimate, se, df, lower, upper, 
                       p.value, Model_Type, In_hypothesis))|>
-  mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
+  left_join(df.for.p.adjust_interaction, 
+            by = 
+              join_by(Outcome, Outcome_Class, Predictor, 
+                      estimate, se, df, lower, upper, 
+                      p.value, Model_Type, In_hypothesis))|>
+  mutate(p_adjust_fdr=
+           case_when(
+             is.na(p_adjust_fdr_full) ~ p_adjust_fdr_interaction,
+                                    T ~ p_adjust_fdr_full),
+    across(.cols=is.numeric, .fns=~round(.x,3)))
+
+
   
+```
 
-  #mutate(where(In_hypothesis==T), p_adjust)
- #mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
+#### Secondary Outcomes PP
 
+```{r eval = PP}
+
+if(PP){
+print("this is a PP test")
+
+
+  print("this is Per Protocol") #TODO Read the PP models as well.
+  Secondary_outcomes_PP <- list(
+  Sledai_models = 
+    readRDS(file = here("Output","LMMlists",
+                "PP","SLEDAI_lmm_list.rds")),
+  SF_36_models = 
+    readRDS(file = here("Output","LMMlists","PP",
+                        "SF36_lmm_list.rds")))
+
+
+Df.SLEDAI.Main<-Secondary_outcomes_PP$Sledai_models$SLEDAI_main_PP|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "SLEDAI",
+         Outcome_Class = "Secondary",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.SLEDAI.Interaction<-Secondary_outcomes_PP$Sledai_models$SLEDAI_interaction_PP|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "SLEDAI",
+         Outcome_Class = "Secondary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.SF_36_physical.Main<-Secondary_outcomes_PP$SF_36_models$main_sf36_physical|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "SF-36 Physical aggregate score",
+         Outcome_Class = "Secondary",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.SF_36_physical.Interaction<-Secondary_outcomes_PP$SF_36_models$interaction_sf36_physical|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "SF-36 Physical aggregate score",
+         Outcome_Class = "Secondary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.SF_36_mental.Main<-Secondary_outcomes_PP$SF_36_models$main_sf36_mental|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "SF-36 Mental aggregate score",
+         Outcome_Class = "Secondary",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.SF_36_mental.Interaction<-Secondary_outcomes_PP$SF_36_models$interaction_sf36_mental|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "SF-36 Mental aggregate score",
+         Outcome_Class = "Secondary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+df.Secondary_outcomes_PP <- 
+  Df.SLEDAI.Main |> 
+  bind_rows(Df.SLEDAI.Interaction)|>
+  bind_rows(Df.SF_36_physical.Main)|>
+  bind_rows(Df.SF_36_physical.Interaction)|>
+  bind_rows(Df.SF_36_mental.Main)|>
+  bind_rows(Df.SF_36_mental.Interaction)
+
+df.for.p.adjust_main_PP <- 
+  df.Secondary_outcomes_PP |> 
+  dplyr::filter(In_hypothesis)|>
+  dplyr::filter(Model_Type == "Full effects")|>
+  mutate(p_adjust_fdr_full = p.adjust(p.value, method = "fdr"))
+
+df.for.p.adjust_interaction_PP <- 
+  df.Secondary_outcomes_PP |> 
+  dplyr::filter(In_hypothesis)|>
+  dplyr::filter(Model_Type == "Interaction effects")|>
+  mutate(p_adjust_fdr_interaction = p.adjust(p.value, method = "fdr"))
+
+df.Secondary_outcomes_PP<-
+  df.Secondary_outcomes_PP|>
+  left_join(df.for.p.adjust_main_PP, 
+            by = 
+              join_by(Outcome, Outcome_Class, Predictor, 
+                      estimate, se, df, lower, upper, 
+                      p.value, Model_Type, In_hypothesis))|>
+  left_join(df.for.p.adjust_interaction_PP, 
+            by = 
+              join_by(Outcome, Outcome_Class, Predictor, 
+                      estimate, se, df, lower, upper, 
+                      p.value, Model_Type, In_hypothesis))|>
+  mutate(p_adjust_fdr=
+           case_when(
+             is.na(p_adjust_fdr_full) ~ p_adjust_fdr_interaction,
+                                    T ~ p_adjust_fdr_full),
+    across(.cols=is.numeric, .fns=~round(.x,3)))
+
+}
 ```
 
 ### Exploratory Outcomes
@@ -232,7 +500,9 @@ Exploratory_outcomes <- list(
   macronutrients_models = 
     readRDS(file = here("Output","LMMlists","macronutrients_list_lmm.rds")),
   anthropometrics_models =
-    readRDS(file = here("Output","LMMlists","anthropometrics_list_lmm.rds"))
+    readRDS(file = here("Output","LMMlists","anthropometrics_list_lmm.rds")),
+  VO2max_models = 
+    readRDS(file = here("Output","LMMlists","Vo2Max_LMM_List.rds")) 
   )
 
 Df.VAS_Physician.Main<-Exploratory_outcomes$VAS_physician_models$main_VAS_physician|>
@@ -253,7 +523,7 @@ Df.VAS_Physician.Interaction<-Exploratory_outcomes$VAS_physician_models$interact
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
@@ -276,7 +546,7 @@ Df.DXA_Adipose_g.Interaction<-Exploratory_outcomes$DXA_models$interaction_total_
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
@@ -299,13 +569,14 @@ Df.DXA_Lean_g.Interaction<-Exploratory_outcomes$DXA_models$interaction_total_lea
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
 
-Df.DXA_gyneoid_g.Main<-Exploratory_outcomes$DXA_models$main_gyneoidDXA.lmm|>
+Df.DXA_gyneoid_g.Main<-
+  Exploratory_outcomes$DXA_models$main_gyneoidDXA.lmm|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Gyneoid Mass (g)",
          Outcome_Class = "Exploratory",
@@ -323,7 +594,7 @@ Df.DXA_gyneoid_g.Interaction<-Exploratory_outcomes$DXA_models$interaction_gyneoi
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
            T~F))|>relocate(
            Outcome, Outcome_Class, Predictor 
          )
@@ -347,7 +618,7 @@ Df.DXA_android_g.Interaction<-Exploratory_outcomes$DXA_models$interaction_androi
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -374,7 +645,7 @@ Df.Activity_MVPA.interaction<-Exploratory_outcomes$Activity_Models$MVPA_back_int
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -400,7 +671,7 @@ Df.QSLAQ.interaction<-Exploratory_outcomes$Qslaq_lmm_models$interaction_qslaq|>
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -426,7 +697,7 @@ Df.QSLAQ_symptoms.interaction<-Exploratory_outcomes$Qslaq_lmm_models$interaction
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -451,8 +722,7 @@ Df.PFT_FVC.Interaction<-Exploratory_outcomes$lung_function_models$model.interact
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -477,8 +747,7 @@ Df.PFT_DLCO.Interaction<-Exploratory_outcomes$lung_function_models$model.interac
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -503,8 +772,7 @@ Df.PFT_FEV1.Interaction<-Exploratory_outcomes$lung_function_models$model.interac
          Outcome_Class = "Exploratory",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -530,7 +798,7 @@ Df.PROM_fatigue.Interaction<-Exploratory_outcomes$PROM_models$VAS_fatigue_intera
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -556,7 +824,7 @@ Df.PROM_pain.Interaction<-Exploratory_outcomes$PROM_models$VAS_pain_interaction|
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -582,7 +850,7 @@ Df.Energy_Intake.Interaction<-Exploratory_outcomes$macronutrients_models$energy_
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -608,7 +876,7 @@ Df.Fat_Intake.Interaction<-Exploratory_outcomes$macronutrients_models$fat_intera
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -634,7 +902,7 @@ Df.carb_Intake.Interaction<-Exploratory_outcomes$macronutrients_models$carb_inte
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -660,7 +928,7 @@ Df.protein_Intake.Interaction<-Exploratory_outcomes$macronutrients_models$protei
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -686,7 +954,7 @@ Df.alcohol_Intake.Interaction<-Exploratory_outcomes$macronutrients_models$alcoho
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -712,7 +980,7 @@ Df.bmi.Interaction<-Exploratory_outcomes$anthropometrics_models$bmi_interaction_
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -738,7 +1006,7 @@ Df.whr.Interaction<-Exploratory_outcomes$anthropometrics_models$WHR_interaction_
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
@@ -764,14 +1032,40 @@ Df.weight.Interaction<-Exploratory_outcomes$anthropometrics_models$weight_intera
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
            Predictor == 
-             "timepointfollowup:treatexercise:m_1_2" ~ T,
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F))|>
   relocate(
            Outcome, Outcome_Class, Predictor 
          )
 
-df.exploratory_outcomes <-   
+Df.vo2max.main <- Exploratory_outcomes$VO2max_models$main.Vo2max.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "VO2max (ml/min)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.vo2max.interaction <- Exploratory_outcomes$VO2max_models$interaction.Vo2max.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "VO2max (ml/min)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+df.exploratory_outcomes <-
   bind_rows(
+            Df.FSS.Interaction,
             Df.VAS_Physician.Main,
             Df.VAS_Physician.Interaction,
             Df.DXA_Adipose_g.Main,
@@ -813,29 +1107,611 @@ df.exploratory_outcomes <-
             Df.whr.Main,
             Df.whr.Interaction,
             Df.weight.Main,
-            Df.weight.Interaction
-            )
+            Df.weight.Interaction,
+            Df.vo2max.main,
+            Df.vo2max.interaction
+            )|> 
+  dplyr::select(-p.adjust_Bonferroni)
 
-df.for.p.adjust_exploratory <- df.exploratory_outcomes |> 
+df.for.p.adjust_exploratory_main <- 
+  df.exploratory_outcomes |>
   dplyr::filter(In_hypothesis)|>
-  mutate(p_adjust_fdr = p.adjust(p.value, method = "fdr"))
+  dplyr::filter(Model_Type == "Full effects")|>
+  mutate(p_adjust_fdr_full = p.adjust(p.value, method = "fdr"))
 
-df.exploratory_outcomes<-df.exploratory_outcomes|>
-  left_join(df.for.p.adjust_exploratory, 
+df.for.p.adjust_exploratory_interaction <- 
+  df.exploratory_outcomes |>
+  dplyr::filter(In_hypothesis)|>
+  dplyr::filter(Model_Type == "Interaction effects")|>
+  mutate(p_adjust_fdr_interaction = p.adjust(p.value, method = "fdr"))
+
+df.exploratory_outcomes<-
+  df.exploratory_outcomes|>
+  left_join(df.for.p.adjust_exploratory_main, 
             by = 
               join_by(Outcome, Outcome_Class, Predictor, 
                       estimate, se, df, lower, upper, 
                       p.value, Model_Type, In_hypothesis))|>
-  mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
+  left_join(df.for.p.adjust_exploratory_interaction, 
+            by = 
+              join_by(Outcome, Outcome_Class, Predictor, 
+                      estimate, se, df, lower, upper, 
+                      p.value, Model_Type, In_hypothesis))|>
+  mutate(p_adjust_fdr=
+           case_when(
+             is.na(p_adjust_fdr_full) ~ p_adjust_fdr_interaction,
+                                    T ~ p_adjust_fdr_full),
+    across(.cols=is.numeric, .fns=~round(.x,3)))
   
 
-  #mutate(where(In_hypothesis==T), p_adjust)
- #mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
-View(df.exploratory_outcomes)
 
-df.exploratory_outcomes_test <-
+```
+
+#### PP exploratory Outcomes
+
+```{r eval = PP}
+if(PP){
+  
+Exploratory_outcomes_PP <- list(
+  VAS_physician_models = 
+    readRDS(file = here("Output","LMMlists","PP","VAS_Physician_lmm_list.rds")),
+  DXA_models =
+    readRDS(file = here("Output","LMMlists","PP","DXA_model.rds")),
+  Activity_Models = 
+    readRDS(file = here("Output","LMMlists","PP","Activity_lmm_list.rds")),
+  Qslaq_lmm_models=
+    readRDS(file = here("Output","LMMlists","PP","Qslaq_lmm_list.rds")),
+  lung_function_models = 
+    readRDS(file = here("Output","LMMlists","PP","lung_lmm_list.rds")),
+  PROM_models = 
+    readRDS(file = here("Output","LMMlists","PP","prom_lmm_list.rds")),
+  macronutrients_models = 
+    readRDS(file = here("Output","LMMlists","PP","macronutrients_list_lmm.rds")),
+  anthropometrics_models =
+    readRDS(file = here("Output","LMMlists","PP","anthropometrics_list_lmm.rds")),
+  VO2max_models = 
+    readRDS(file = here("Output","LMMlists","PP","Vo2Max_LMM_List.rds")) 
+  )
+
+Df.VAS_Physician.Main<-Exploratory_outcomes_PP$VAS_physician_models$main_VAS_physician|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "VAS Physician",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.VAS_Physician.Interaction<-Exploratory_outcomes_PP$VAS_physician_models$interaction_VAS_physician|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "VAS Physician",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_Adipose_g.Main<-Exploratory_outcomes_PP$DXA_models$main_total_adipose_g_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Adipose Tissue (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_Adipose_g.Interaction<-Exploratory_outcomes_PP$DXA_models$interaction_total_adipose_g_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Adipose Tissue (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_Lean_g.Main<-Exploratory_outcomes_PP$DXA_models$main_total_lean_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lean Mass (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_Lean_g.Interaction<-Exploratory_outcomes_PP$DXA_models$interaction_total_lean_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lean Mass (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+
+Df.DXA_gyneoid_g.Main<-Exploratory_outcomes_PP$DXA_models$main_gyneoidDXA_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Gyneoid Mass (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_gyneoid_g.Interaction<-Exploratory_outcomes_PP$DXA_models$interaction_gyneoidDXA_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Gyneoid Mass (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
+           T~F))|>relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_android_g.Main<-Exploratory_outcomes_PP$DXA_models$main_androidDXA_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Android Mass (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.DXA_android_g.Interaction<-Exploratory_outcomes_PP$DXA_models$interaction_androidDXA_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Android Mass (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:ifn_1_netto:treatexercise" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+
+Df.Activity_MVPA.Main<-Exploratory_outcomes_PP$Activity_Models$MVPA_back_main|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "MVPA (min per day)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Activity_MVPA.interaction<-Exploratory_outcomes_PP$Activity_Models$MVPA_back_interaction|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "MVPA (min per day)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.QSLAQ.Main<-Exploratory_outcomes_PP$Qslaq_lmm_models$main_qslaq|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Qslaq",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.QSLAQ.interaction<-Exploratory_outcomes_PP$Qslaq_lmm_models$interaction_qslaq|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Qslaq",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.QSLAQ_symptoms.Main<-Exploratory_outcomes_PP$Qslaq_lmm_models$main_qslaq.symptom|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Qslaq symptom score",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.QSLAQ_symptoms.interaction<-Exploratory_outcomes_PP$Qslaq_lmm_models$interaction_qslaq.symptom|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Qslaq symptom score",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PFT_FVC.Main<-Exploratory_outcomes_PP$lung_function_models$model.main.fvc_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lung Function - Forced Vital Capacity (ml)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PFT_FVC.Interaction<-Exploratory_outcomes_PP$lung_function_models$model.interaction.fvc_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lung Function - Forced Vital Capacity (ml)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PFT_DLCO.Main<-Exploratory_outcomes_PP$lung_function_models$model.main.dlco_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lung Function - DLCO (ml)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PFT_DLCO.Interaction<-Exploratory_outcomes_PP$lung_function_models$model.interaction.dlco_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lung Function - DLCO (ml)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PFT_FEV1.Main<-Exploratory_outcomes_PP$lung_function_models$model.main.fev1_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lung Function - FEV1 (ml)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PFT_FEV1.Interaction<-Exploratory_outcomes_PP$lung_function_models$model.interaction.fev1_PP.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Lung Function - FEV1 (ml)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PROM_fatigue.Main<-Exploratory_outcomes_PP$PROM_models$VAS_fatigue_main|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Fatigue Visual Analog Scale",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PROM_fatigue.Interaction<-Exploratory_outcomes_PP$PROM_models$VAS_fatigue_interaction|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Fatigue Visual Analog Scale",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PROM_pain.Main<-Exploratory_outcomes_PP$PROM_models$VAS_pain_main|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Pain Visual Analog Scale",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.PROM_pain.Interaction<-Exploratory_outcomes_PP$PROM_models$VAS_pain_interaction|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Pain Visual Analog Scale",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Energy_Intake.Main<-Exploratory_outcomes_PP$macronutrients_models$energy_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Energy Intake (kJ)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Energy_Intake.Interaction<-Exploratory_outcomes_PP$macronutrients_models$energy_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Energy Intake (kJ)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Fat_Intake.Main<-Exploratory_outcomes_PP$macronutrients_models$fat_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Lipid Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.Fat_Intake.Interaction<-Exploratory_outcomes_PP$macronutrients_models$fat_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Lipid Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.carb_Intake.Main<-Exploratory_outcomes_PP$macronutrients_models$carb_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Carbohydrate Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.carb_Intake.Interaction<-Exploratory_outcomes_PP$macronutrients_models$carb_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Carbohydrate Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.protein_Intake.Main<-Exploratory_outcomes_PP$macronutrients_models$protein_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Protein Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.protein_Intake.Interaction<-Exploratory_outcomes_PP$macronutrients_models$protein_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily Protein Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.alcohol_Intake.Main<-Exploratory_outcomes_PP$macronutrients_models$alcohol_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily ethanol Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.alcohol_Intake.Interaction<-Exploratory_outcomes_PP$macronutrients_models$alcohol_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Daily ethanol Intake (g)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.bmi.Main<-Exploratory_outcomes_PP$anthropometrics_models$bmi_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Body Mass Index",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.bmi.Interaction<-Exploratory_outcomes_PP$anthropometrics_models$bmi_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Body Mass Index",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.whr.Main<-Exploratory_outcomes_PP$anthropometrics_models$WHR_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Waist Height Ratio",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.whr.Interaction<-Exploratory_outcomes_PP$anthropometrics_models$WHR_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Waist Height Ratio",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.weight.Main<-Exploratory_outcomes_PP$anthropometrics_models$weight_main_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Body weight (kg)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Full effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise" ~ T,
+           T~F
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+Df.weight.Interaction<-Exploratory_outcomes_PP$anthropometrics_models$weight_interaction_lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Body weight (kg)",
+         Outcome_Class = "Exploratory",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == 
+             "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+
+df.exploratory_outcomes_PP <-
   bind_rows(
-            Df.FSS.Interaction,
+            Df.FSS.Interaction_PP,
             Df.VAS_Physician.Main,
             Df.VAS_Physician.Interaction,
             Df.DXA_Adipose_g.Main,
@@ -881,24 +1757,186 @@ df.exploratory_outcomes_test <-
             )|> 
   dplyr::select(-p.adjust_Bonferroni)
 
-df.for.p.adjust_exploratory_test <- 
-  df.exploratory_outcomes_test |>
+df.for.p.adjust_exploratory_main_PP <- 
+  df.exploratory_outcomes_PP |>
   dplyr::filter(In_hypothesis)|>
-  mutate(p_adjust_fdr = p.adjust(p.value, method = "fdr"))
+  dplyr::filter(Model_Type == "Full effects")|>
+  mutate(p_adjust_fdr_full = p.adjust(p.value, method = "fdr"))
 
-df.exploratory_outcomes_test<-df.exploratory_outcomes_test|>
-  left_join(df.for.p.adjust_exploratory_test, 
+df.for.p.adjust_exploratory_interaction_PP <- 
+  df.exploratory_outcomes_PP |>
+  dplyr::filter(In_hypothesis)|>
+  dplyr::filter(Model_Type == "Interaction effects")|>
+  mutate(p_adjust_fdr_interaction = p.adjust(p.value, method = "fdr"))
+
+df.exploratory_outcomes_PP<-
+  df.exploratory_outcomes_PP|>
+  left_join(df.for.p.adjust_exploratory_main_PP, 
             by = 
               join_by(Outcome, Outcome_Class, Predictor, 
                       estimate, se, df, lower, upper, 
                       p.value, Model_Type, In_hypothesis))|>
-  mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
-  
+  left_join(df.for.p.adjust_exploratory_interaction_PP, 
+            by = 
+              join_by(Outcome, Outcome_Class, Predictor, 
+                      estimate, se, df, lower, upper, 
+                      p.value, Model_Type, In_hypothesis))|>
+  mutate(p_adjust_fdr=
+           case_when(
+             is.na(p_adjust_fdr_full) ~ p_adjust_fdr_interaction,
+                                    T ~ p_adjust_fdr_full),
+    across(.cols=is.numeric, .fns=~round(.x,3)))
+}
 
-View(df.exploratory_outcomes_test)
 ```
 
+## Generalized Linear Hypothesis Testing Model Aggregation
+
+```{r eval = F}
+directory<-here("Output","Generalized linear hypothesis testing")
+dir(directory)
+
+glhts <- data.frame()
+
+for(glht_model in dir(directory)){
+  if(glht_model == "PP"){next}
+  glht<-readRDS(here("Output","Generalized linear hypothesis testing",glht_model))
+  
+  glhts <-
+    glhts |>
+    rbind(glht)
+}
+
+  
+```
+
+### Primary Models - GLHT
+
+```{r eval =F}
+
+primary_glhts <-
+  glhts|>
+  dplyr::filter(
+    outcome_priority == "Primary"
+  )|>
+  relocate(Parameter, outcome)|>
+  mutate(
+    p_adjust_bonferroni = case_when(is.na(as.numeric(p.value) * 2) ~ "<0.001",
+                                    as.numeric(p.value) * 2>1 ~ ">0.999",
+                                    T ~ as.character(as.numeric(p.value) * 2)),
+  in_hypothesis = case_when(
+    Parameter == "Difference in ifn_1_netto interaction exercise minus control" ~ T,
+    Parameter == "Exercise_FU minus Control_FU" ~ T,
+    T~F))
+
+```
+
+### Secondary Models - GLHT
+
+```{r eval =F}
+secondary_glhts <-
+  glhts|>
+  dplyr::filter(
+    outcome_priority == "Secondary"
+  )|>
+  relocate(Parameter, outcome)|>
+  mutate(
+    p_adjust_bonferroni = NA_character_,
+  in_hypothesis = case_when(
+    Parameter == "Difference in ifn_1_netto interaction exercise minus control" ~ T,
+    Parameter == "Exercise_FU minus Control_FU" ~ T,
+    T~F))
+
+df.for.p.adjust <- 
+  secondary_glhts |> 
+  dplyr::filter(in_hypothesis)|>
+  mutate(p_adjust_fdr = p.adjust(p.value, method = "fdr"))
+
+secondary_glhts<-
+  secondary_glhts|>
+  left_join(df.for.p.adjust)|>
+  mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
+
+```
+
+### Exploratory Models - GLHT
+
+```{r eval=F}
+exploratory_glhts <-
+  glhts|>
+  dplyr::filter(
+    outcome_priority == "Exploratory" | 
+      outcome == "fatigue.mean" & Parameter=="Difference in ifn_1_netto interaction exercise minus control"
+  )|>
+  relocate(Parameter, outcome)|>
+  mutate(
+    p_adjust_bonferroni = NA_character_,
+  in_hypothesis = case_when(
+    Parameter == "Difference in ifn_1_netto interaction exercise minus control" ~ T,
+    Parameter == "Exercise_FU minus Control_FU" ~ T,
+    T~F))
+
+df.for.p.adjust <- 
+  exploratory_glhts |> 
+  dplyr::filter(in_hypothesis)|>
+  mutate(p_adjust_fdr = p.adjust(as.numeric(p.value), method = "fdr"))
+
+exploratory_glhts<-
+  exploratory_glhts|>
+  left_join(df.for.p.adjust)|>
+  mutate(across(.cols=is.numeric, .fns=~round(.x,3)))
+
+
+fatigue_interaction_p_adjust<-
+  exploratory_glhts|>
+  dplyr::filter(
+    outcome == "fatigue.mean"
+  )|>
+  pull("p_adjust_fdr")
+
+primary_glhts<-
+  primary_glhts|>
+  mutate(
+    p_adjust_fdr = case_when(
+      outcome == "fatigue.mean" & Parameter == "Difference in ifn_1_netto interaction exercise minus control" ~ fatigue_interaction_p_adjust,
+      T ~ NA_real_
+    )
+  )
+
+exploratory_glhts_new<-
+  exploratory_glhts|>
+  dplyr::filter(outcome!="fatigue.mean")
+
+```
+
+## GLHTs with adjusted Ps
+
+```{r eval =F}
+glhts.adjusted <- 
+  rbind(primary_glhts,
+        secondary_glhts,
+        exploratory_glhts_new)
+
+glhts.adjusted|>
+  write_xlsx(
+    path =  here("Output", "ModelAggregates", "GLHTs","AllModels.xlsx")
+  )
+
+if(PP){
+  
+  rbind(primary_glhts_PP,
+        secondary_glhts_PP,
+        exploratory_glhts_new_PP)|>
+  write_xlsx(
+    path =  here("Output", "ModelAggregates","PP", "GLHTs","AllModels.xlsx")
+  )
+}
+```
+
+#### 
+
 ## Export Model Overviews
+
 ```{r}
 
 df.Primary_outcomes|>
@@ -928,10 +1966,55 @@ df_all_outcomes_paper1|>
   path = here("Output", "ModelAggregates", "AllModels.xlsx")
 )
 
-df_all_outcomes_paper1|>flextable::flextable()
+df_all_outcomes_paper1|>
+  flextable::flextable()|>
+  flextable::save_as_docx(
+    path = here("output","modelaggregates",
+                "AllModelsFlextable.docx"))
+
 
 ```
 
+#### Export PP
+
+```{r}
+
+if(PP){
+df.Primary_outcomes_PP|>
+  write_xlsx(
+  path = here("Output", "ModelAggregates", "PP","PrimaryModels.xlsx")
+)
+
+df.Secondary_outcomes_PP|>
+  write_xlsx(
+  path = here("Output", "ModelAggregates","PP", "SecondaryModels.xlsx")
+)
+
+df.exploratory_outcomes_PP|>
+  write_xlsx(
+  path = here("Output", "ModelAggregates","PP", "ExploratoryModels.xlsx")
+)
+
+df_all_outcomes_paper1_PP<-
+  bind_rows(
+    df.Primary_outcomes_PP,
+    df.Secondary_outcomes_PP,
+    df.exploratory_outcomes_PP
+  )
+
+df_all_outcomes_paper1_PP|>
+  write_xlsx(
+  path = here("Output", "ModelAggregates","PP", "AllModels.xlsx")
+)
+
+df_all_outcomes_paper1_PP|>
+  flextable::flextable()|>
+  flextable::save_as_docx(
+    path = here("output","modelaggregates","PP",
+                "AllModelsFlextable.docx"))
+  
+}
+```
 
 ## Graphical Aggregation
 
@@ -941,7 +2024,7 @@ SecondaryOutcomesNoColor<-
   df.Secondary_outcomes|>
   filter(In_hypothesis) |>
   ggplot(aes(x=p.value, shape = Predictor))+
-  geom_histogram()
+  geom_histogram(bins = 8)
 
   ggsave(
     plot = SecondaryOutcomesNoColor,
@@ -952,7 +2035,7 @@ SecondaryOutcomesColor<-
   df.Secondary_outcomes|>
   filter(In_hypothesis) |>
   ggplot(aes(x=p.value, fill = Outcome, shape = Predictor))+
-  geom_histogram()
+  geom_histogram(bins = 8)
 
 ggsave(
     plot = SecondaryOutcomesColor,
@@ -964,7 +2047,7 @@ ExploratoryOutcomesNoColor<-
 df.exploratory_outcomes |>
   filter(In_hypothesis) |>
   ggplot(aes(x=p.value))+
-  geom_histogram()
+  geom_histogram(bins = 10)
 
 ggsave(
     plot = ExploratoryOutcomesNoColor,
@@ -975,7 +2058,7 @@ ExploratoryOutcomesColor<-
 df.exploratory_outcomes |>
   filter(In_hypothesis) |>
   ggplot(aes(x=p.value, fill = Outcome))+
-  geom_histogram()
+  geom_histogram(bins = 10)
 
 ggsave(
     plot = ExploratoryOutcomesColor,
@@ -993,4 +2076,10 @@ ExploratoryOutcomesColor
 
 ```{r}
 print("This is the end of ModelAggregation.qmd")
+if(PP){print("This was a PP analysis")}
+
+library(beepr)
+beepr::beep(
+  "complete"
+)
 ```

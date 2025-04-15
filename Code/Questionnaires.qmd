@@ -20,16 +20,22 @@ library(stringr)
 library(writexl)
 library(LMMstar)
 library(plotly)
+library(multcomp)
+#install.packages("remotes")
+#remotes::install_github("bozenne/butils")
+#renv::install("bozenne/butils")
+library(butils)
+
 #install.packages("targets")
 #library(targets)
 #use_targets()
 set.seed(42069)
 ```
 
-## Choose mITT or PP (or ITT by leaving both F)
+## Choose mITT or PP
 
 ```{r}
-mITT = T
+mITT =T
 PP = F
 ```
 
@@ -54,19 +60,21 @@ questionnaires.combined.data2<-
   questionnaires.combined.data|>
   left_join(PP_list)
 
-linear.mixed.model.list<-
-  readRDS(
-    file = here(
-      "Output",
-            paste0(
-              "LMM_List", 
-              ifelse(PP, "PP", "mITT"),
-                ".rds"
-        )
-      )
-    )
+#linear.mixed.model.list<-
+#  readRDS(
+#    file = here(
+#      "Output",
+#            paste0(
+#              "LMM_List", 
+#              ifelse(PP, "PP", "mITT"),
+#                ".rds"
+#        )
+#      )
+#    )
 
-questionnaires.combined.data <- questionnaires.combined.data2 |>filter(
+questionnaires.combined.data <- 
+  questionnaires.combined.data2 |>
+  dplyr::filter(
   timepoint == "baseline" | timepoint == "followup")|> 
   mutate(
   timepoint = 
@@ -74,9 +82,13 @@ questionnaires.combined.data <- questionnaires.combined.data2 |>filter(
                                    "followup")))
   
 
-questionnaires.combined.data.with.post.followup <- questionnaires.combined.data2|>
+questionnaires.combined.data.with.post.followup <- 
+  questionnaires.combined.data2|>
 #  filter(!is.na(fatigue.mean)) |>
-  relocate(id, timepoint, treat)|>arrange(id)
+  relocate(id, timepoint, treat)|>
+  arrange(id)|>
+  group_by(id)|>
+  fill(ifn_1_netto)
 ```
 
 ## Main Model Fatigue
@@ -88,29 +100,11 @@ model25.main.fatigue_as_FSS.lmm<-lmm(
   structure = "UN",
   data = questionnaires.combined.data
 )
-summary(model25.main.fatigue_as_FSS.lmm, level = 0.975)
+summary(model25.main.fatigue_as_FSS.lmm, level = 0.95)
 plot(model25.main.fatigue_as_FSS.lmm, type=c("qqplot"))
 plot(model25.main.fatigue_as_FSS.lmm, type=c("scatterplot"))
-linear.mixed.model.list$model25.main.fatigue_as_FSS.lmm<-
-  model.tables(model25.main.fatigue_as_FSS.lmm, level =0.975)
-
-if(PP){
-  questionnaires.combined.data.PP<-questionnaires.combined.data|>filter(PP)
-  
-  
-  model26.main_PP.fatigue_as_FSS.lmm<-lmm(
-  formula = fatigue.mean ~ timepoint+treat:timepoint+sex,
-  repetition = ~timepoint|id,
-  structure = "UN",
-  data = questionnaires.combined.data.PP
-)
-summary(model26.main_PP.fatigue_as_FSS.lmm)
-plot(model26.main_PP.fatigue_as_FSS.lmm, type=c("qqplot"))
-plot(model26.main_PP.fatigue_as_FSS.lmm, type=c("scatterplot"))
-linear.mixed.model.list$model26.main_PP.fatigue_as_FSS.lmm<-
-  model.tables(model26.main_PP.fatigue_as_FSS.lmm, level =0.975)
-
-}
+#linear.mixed.model.list$model25.main.fatigue_as_FSS.lmm<-
+ # model.tables(model25.main.fatigue_as_FSS.lmm, level =0.975)
 
 
 questionnaires.data.no.outlier<-
@@ -124,61 +118,81 @@ model27.main_no_outlier.fatigue_as_FSS.lmm<-lmm(
 )
 summary(model27.main_no_outlier.fatigue_as_FSS.lmm, level = 0.975)
 
-linear.mixed.model.list$model27.main_no_outlier.fatigue_as_FSS.lmm<-
-  model.tables(model27.main_no_outlier.fatigue_as_FSS.lmm, level =0.975)
 
 #----------------------------------
 #  Interaction Models:
 #----------------------------------
 
-model28.interaction_m_1_2.fatigue_as_FSS.lmm<-lmm(
+### THIS IS THE MODEL SPECIFIED IN THE SAP
+model.IFN1.FSS.lmm<-lmm(
   formula = 
-    fatigue.mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+plot(model.IFN1.FSS.lmm, type = "qqplot")
+plot(model.IFN1.FSS.lmm, type = "scatterplot")
+
+summary(model.IFN1.FSS.lmm, level = 0.95)
+
+model.IFN1.FSS.NoOutlier.lmm<-lmm(
+  formula = 
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.data.no.outlier
+)
+plot(model.IFN1.FSS.NoOutlier.lmm, type = "qqplot")
+plot(model.IFN1.FSS.NoOutlier.lmm, type = "scatterplot")
+
+summary(model.IFN1.FSS.NoOutlier.lmm, level = 0.975)
+
+model28.interaction_IFN.fatigue_as_FSS.lmm<-lmm(
+  formula = 
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    all_ifn_netto_t_test+
+    all_ifn_netto_t_test:timepoint+
+    all_ifn_netto_t_test:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
 )
 
-summary(model28.interaction_m_1_2.fatigue_as_FSS.lmm, level = 0.975)
+summary(model28.interaction_IFN.fatigue_as_FSS.lmm, level = 0.975)
 
 
-model28a.interaction_m_1_2.fatigue_as_FSS.lmm<-lmm(
-  formula = 
-    fatigue.mean ~ timepoint+treat:timepoint+ m_1_2+treat:m_1_2+sex,
-  repetition = ~timepoint|id,
-  structure = "UN",
-  data = questionnaires.combined.data
-)
 
-summary(model28.interaction_m_1_2.fatigue_as_FSS.lmm, level = 0.975)
-
-
-if(PP){
- model29.interaction_m_1_2_PP.fatigue_as_FSS.lmm<-lmm(
-  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
-  repetition = ~timepoint|id,
-  structure = "UN",
-  data = questionnaires.combined.data.PP
-)
-
-summary(model29.interaction_m_1_2_PP.fatigue_as_FSS.lmm, level = 0.975)
-
-linear.mixed.model.list$model29.interaction_m_1_2_PP.fatigue_as_FSS.lmm<-
-  model.tables(model29.interaction_m_1_2_PP.fatigue_as_FSS.lmm, level =0.975)
-
-}
-
-model30.interaction_m_1_2_no_outlier.fatigue_as_FSS.lmm<-lmm(
-  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+model30.interaction_all_IFN_no_outlier.fatigue_as_FSS.lmm<-lmm(
+ formula = 
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    all_ifn_netto_t_test+
+    all_ifn_netto_t_test:timepoint+
+    all_ifn_netto_t_test:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.data.no.outlier
 )
 
-summary(model30.interaction_m_1_2_no_outlier.fatigue_as_FSS.lmm, level = 0.975)
-
-linear.mixed.model.list$model30.interaction_m_1_2_no_outlier.fatigue_as_FSS.lmm<-
-  model.tables(model30.interaction_m_1_2_no_outlier.fatigue_as_FSS.lmm, level =0.975)
+summary(model30.interaction_all_IFN_no_outlier.fatigue_as_FSS.lmm, level = 0.975)
 
 
 #----------------------------
@@ -186,7 +200,13 @@ linear.mixed.model.list$model30.interaction_m_1_2_no_outlier.fatigue_as_FSS.lmm<
 #----------------------------
 
 model31.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm<-lmm(
-  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ ifn_1_el_sherb+treat:timepoint:ifn_1_el_sherb+sex,
+  formula = fatigue.mean ~ 
+    timepoint+
+    treat+
+    treat:timepoint+ 
+    ifn_1_el_sherb+
+    treat:timepoint:ifn_1_el_sherb+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -194,24 +214,20 @@ model31.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm<-lmm(
 
 summary(model31.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm, level = 0.975)
 
-linear.mixed.model.list$model31.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm<-
-  model.tables(model31.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm, level =0.975)
-
-if(PP){
- model32.interaction_el_sherbiny_IFN1_PP.fatigue_as_FSS.lmm<-lmm(
-  formula = fatigue.mean ~ timepoint+treat+treat:timepoint+ ifn_1_el_sherb+treat:timepoint:ifn_1_el_sherb+sex,
+model31a.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm<-lmm(
+  formula = fatigue.mean ~ 
+    timepoint+
+    treat:timepoint+
+    ifn_1_el_sherb+
+    treat:ifn_1_el_sherb+
+    sex,
   repetition = ~timepoint|id,
   structure = "UN",
-  data = questionnaires.combined.data.PP
+  data = questionnaires.data.no.outlier
 )
 
-summary(model32.interaction_el_sherbiny_IFN1_PP.fatigue_as_FSS.lmm, level =0.975)
+summary(model31a.interaction_el_sherbiny_IFN1.fatigue_as_FSS.lmm, level = 0.975)
 
-linear.mixed.model.list$model32.interaction_el_sherbiny_IFN1_PP.fatigue_as_FSS.lmm<-
-  model.tables(model32.interaction_el_sherbiny_IFN1_PP.fatigue_as_FSS.lmm, level =0.975)
-
-
-}
 
 
 #library(lme4)
@@ -233,13 +249,88 @@ linear.mixed.model.list$model32.interaction_el_sherbiny_IFN1_PP.fatigue_as_FSS.l
 
 ```
 
-These Models, above, are actually quite interesting, due to the hierarchy we established, that we first wanted to see an effect of exercise, and then wanted to explore whether that effect was caused by a difference in IFN-Genesignature (such as M_1_2). We end up having no significant effect. This is because the group, as a whole gains little improvement, or only a tendency towards lower fatigue with exercise. While there seems to be a benefit in those with a lower m_1_2 z-score than those with high m_1_2 z-score. This is, however, largely driven by a single outlier.
+These Models, above, are actually quite interesting, due to the hierarchy we established, that we first wanted to see an effect of exercise, and then wanted to explore whether that effect was caused by a difference in IFN-Genesignature (such as IFN_1_netto). We end up having no significant effect. This is because the group, as a whole gains little improvement, or only a tendency towards lower fatigue with exercise. While there seems to be a benefit in those with a lower IFN-1 z-score than those with high IFN-1 z-score. This is, however, largely driven by a single outlier.
+
+### Fatigue Model only normal IFN-signature
+
+```{r}
+model25.main.fatigue_as_FSS.normalIFN.lmm<-lmm(
+  formula = fatigue.mean ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>
+    dplyr::filter(ifn_1_netto<=2)
+)
+summary(model25.main.fatigue_as_FSS.normalIFN.lmm, level = 0.975)
+plot(model25.main.fatigue_as_FSS.normalIFN.lmm, type=c("qqplot"))
+plot(model25.main.fatigue_as_FSS.normalIFN.lmm, type=c("scatterplot"))
+```
+
+### Main Model Fatigue PP
+
+```{r}
+
+if(PP){
+  questionnaires.combined.data.PP<-
+    questionnaires.combined.data|>
+    filter(PP)
+  
+  
+  model26.main_PP.fatigue_as_FSS.lmm<-lmm(
+  formula = fatigue.mean ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data.PP
+)
+summary(model26.main_PP.fatigue_as_FSS.lmm)
+plot(model26.main_PP.fatigue_as_FSS.lmm, type=c("qqplot"))
+plot(model26.main_PP.fatigue_as_FSS.lmm, type=c("scatterplot"))
+
+ model29.interaction_ifn1_PP.fatigue_as_FSS.lmm<-lmm(
+  formula = fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data.PP
+)
+
+summary(model29.interaction_ifn1_PP.fatigue_as_FSS.lmm, level = 0.975)
+
+
+ model32.interaction_all_IFN_PP.fatigue_as_FSS.lmm<-lmm(
+  formula = fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    all_ifn_netto_t_test+
+    all_ifn_netto_t_test:timepoint+
+    all_ifn_netto_t_test:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data.PP
+)
+
+summary(model32.interaction_all_IFN_PP.fatigue_as_FSS.lmm, level =0.975)
+
+
+
+}
+
+
+```
 
 ##Let's use a for loop to look at the other IFN-signatures
 
 ```{r}
 #this checks the other interferon signatures, tnf signature and IL-6 signature, which must be seen as exploratory models.
 list_of_scores_to_see_differences_over <- c(
+  "ifn_1_netto",
+  "all_ifn_netto_t_test",
   "m_1_2", 
   "m_1_2_geomean",
   "m_3_4", 
@@ -264,15 +355,20 @@ list_of_scores_to_see_differences_over <- c(
 list_of_fatigue_ifn_scores<-list()
 
 for (IFNsig in list_of_scores_to_see_differences_over){
-  i<-as.character(32+which(list_of_scores_to_see_differences_over==IFNsig))
   model_name <- paste0("model",
-                       i,
                        ".interaction_",
                        IFNsig,
                        ".Fatigue.lmm")
   
 model2.interaction.fatigue.lmm<-lmm(
-  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+  formula = 
+  reformulate(paste0("timepoint",
+                     "+treat+",
+                     "treat:timepoint+",
+                     IFNsig,
+                     "+timepoint:",IFNsig,
+                     "+treat:timepoint:",IFNsig,
+                     "+sex"),
                         response="fatigue.mean"),
   repetition = ~timepoint|id,
   structure = "UN",
@@ -283,11 +379,42 @@ summary(model2.interaction.fatigue.lmm)
 plot(model2.interaction.fatigue.lmm, type=c("qqplot"))
 plot(model2.interaction.fatigue.lmm, type=c("scatterplot"))
 
-list_of_fatigue_ifn_scores[[model_name]] <- model.tables(model2.interaction.fatigue.lmm, level = 0.975)
+list_of_fatigue_ifn_scores[[model_name]] <- 
+  model.tables(model2.interaction.fatigue.lmm, level = 0.975)
 
 }
-linear.mixed.model.list$ifn_score_interactions_fatigue<-list_of_fatigue_ifn_scores
 
+list_of_fatigue_ifn_scores_reduced_models<-list()
+
+#for (IFNsig in list_of_scores_to_see_differences_over){
+#  i<-as.character(32+which(list_of_scores_to_see_differences_over==IFNsig))
+#  model_name <- paste0("model_reduced_",
+#                       i,
+#                       ".interaction_",
+#                       IFNsig,
+#                       ".Fatigue.lmm")
+#  
+#model.interaction.fatigue.lmm<-lmm(
+#  formula = 
+#    reformulate(
+#      paste0("timepoint+treat+treat:timepoint+",
+#             IFNsig,
+#             "+treat:",IFNsig,"+sex"),
+#                        response="fatigue.mean"),
+#  repetition = ~timepoint|id,
+#  structure = "UN",
+#  data = questionnaires.combined.data
+#)
+
+#summary(model.interaction.fatigue.lmm)
+#plot(model.interaction.fatigue.lmm, type=c("qqplot"))
+#plot(model.interaction.fatigue.lmm, type=c("scatterplot"))
+
+#list_of_fatigue_ifn_scores_reduced_models[[model_name]] <- model.tables(model2.interaction.fatigue.lmm, #level = 0.975)
+#
+#}
+
+list_of_fatigue_ifn_scores_PP<-list()
 if(PP){
 for (IFNsig in list_of_scores_to_see_differences_over){
   i<-as.character(51+which(list_of_scores_to_see_differences_over==IFNsig))
@@ -297,7 +424,14 @@ for (IFNsig in list_of_scores_to_see_differences_over){
                        IFNsig,
                        ".Fatigue.lmm")
 model2.interaction.fatigue.lmm<-lmm(
-  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+  formula = 
+  reformulate(paste0("timepoint",
+                     "+treat+",
+                     "treat:timepoint+",
+                     IFNsig,
+                     "+timepoint:",IFNsig,
+                     "+treat:timepoint:",IFNsig,
+                     "+sex"),
                         response="fatigue.mean"),
   repetition = ~timepoint|id,
   structure = "UN",
@@ -313,69 +447,387 @@ list_of_fatigue_ifn_scores_PP[[model_name]] <- model.tables(model2.interaction.f
 
 }
   
-  linear.mixed.model.list$list_of_fatigue_ifn_scores_PP<- list_of_fatigue_ifn_scores_PP
+ # linear.mixed.model.list$list_of_fatigue_ifn_scores_PP<- list_of_fatigue_ifn_scores_PP
 }
   
 ```
 
-## graphics
+## Graphics
 
 ```{r}
+fatigue.plot<-
+  plot(model25.main.fatigue_as_FSS.lmm, 
+     type = "fit", color = "treatment", obs.alpha = 0.25, ci = F,
+     time.var = "timepoint",
+     at = data.frame(sex="F"))
 
-fatigue_m12_quants.plot<-
-  plot(model28.interaction_m_1_2.fatigue_as_FSS.lmm, 
+FSS.plot<-fatigue.plot$plot+
+  theme_bw()+
+  ylab("Fatigue Severity Scale")
+
+FSS.plot|>
+ggsave(
+  filename = here("output","graphics","fatigue.plot.jpg"),
+  width = 12
+)
+
+
+fatigue_IFN_quants.plot<-
+  plot(model28.interaction_IFN.fatigue_as_FSS.lmm, 
      type = "fit", color = "treatment", obs.alpha = 0.5, ci = F,
-     time.var = "timepoint", facet = ~ cut_interval(m_1_2, 3))
+     time.var = "timepoint", facet = ~ cut_interval(all_ifn_netto_t_test, 3))
 
 saveRDS(
-  object = fatigue_m12_quants.plot,
-  file = here("output","graphics","fatigue_m12_quants.plot.rds")
+  object = fatigue_IFN_quants.plot,
+  file = here("output","graphics","fatigue_IFN_quants.plot.rds")
 )
 
 ggsave(
-  plot = fatigue_m12_quants.plot$plot,
-  filename = here("output","graphics","fatigue_m12_quants.plot.jpg"),
+  plot = fatigue_IFN_quants.plot$plot,
+  filename = here("output","graphics","fatigue_IFN_quants.plot.jpg"),
+  width = 12
+)
+
+
+quant.ifn1.questionnaires<-
+  questionnaires.combined.data|>
+  filter( timepoint =="baseline")|>
+  pull(ifn_1_netto)|>
+  quantile(probs=c(0.33, .67), na.rm=T)
+
+
+elevated_median.ifn1.questionnaires<-
+  questionnaires.combined.data|>
+  dplyr::filter(timepoint =="baseline")|>
+  dplyr::filter(ifn_1_netto >=2)|>
+  pull(ifn_1_netto)|>
+  median(na.rm = T)
+  
+
+questionnaires.combined.data<-
+  questionnaires.combined.data%>% 
+  mutate(  
+    ifn1_quantile_at_baseline = 
+             case_when(is.na(ifn_1_netto)~ NA_character_,
+                       T ~ factor(
+                         findInterval(ifn_1_netto, 
+                                      c(-Inf, 
+                                        quant.ifn1.questionnaires, 
+                                        Inf)))),
+    ifn1_quantile_at_baseline = 
+             factor(ifn1_quantile_at_baseline, 
+                    levels = 1:3, 
+                    labels = c("lowest 33%", "middle 33-67%", "highest 33%")),
+    treat_constrain_at_base = case_when(
+             timepoint == "screening" ~ "control",
+             T ~ treatment),
+    ifn1_elevated_at_baseline = 
+             case_when(is.na(ifn_1_netto)~ NA_character_,
+                       T ~ factor(
+                         findInterval(ifn_1_netto, c(-Inf, 2, elevated_median.ifn1.questionnaires, Inf)))),
+    ifn1_elevated_at_baseline = 
+            factor(ifn1_elevated_at_baseline, 
+                  levels = 1:3, 
+                    labels = c("Normal", "Slightly Elevated", "Highly elevated"))
+           )
+
+
+model.ifn1_quantile_interaction.FSS.lmm<-lmm(
+  formula = 
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn1_quantile_at_baseline+
+    ifn1_quantile_at_baseline:timepoint+
+    ifn1_quantile_at_baseline:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+summary(model.ifn1_quantile_interaction.FSS.lmm, level = 0.975)
+plot(model.ifn1_quantile_interaction.FSS.lmm, type = "scatterplot")
+plot(model.ifn1_quantile_interaction.FSS.lmm, type = "qqplot")
+plot(model.ifn1_quantile_interaction.FSS.lmm, type = "fit")
+
+
+
+model.ifn1_elevation_interaction.FSS.lmm<-lmm(
+  formula = 
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn1_elevated_at_baseline+
+    ifn1_elevated_at_baseline:timepoint+
+    ifn1_elevated_at_baseline:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data
+)
+summary(model.ifn1_elevation_interaction.FSS.lmm, level = 0.975)
+plot(model.ifn1_elevation_interaction.FSS.lmm, type = "scatterplot")
+plot(model.ifn1_elevation_interaction.FSS.lmm, type = "qqplot")
+plot(model.ifn1_elevation_interaction.FSS.lmm, type = "fit")
+```
+
+### Plots from LMMs
+```{r}
+model_FFS_Quants_plot<-
+  plot(model.ifn1_quantile_interaction.FSS.lmm, type = "fit", 
+     obs.alpha = 0.2, 
+     ci = F, 
+     #ci.alpha = 0.1,
+     size.text = 12, 
+     colo="treat_constrain_at_base", 
+     facet = ~ifn1_quantile_at_baseline,
+     at = data.frame(sex = "F"))
+
+pretty_plot_FSS_Quants <-
+  model_FFS_Quants_plot$plot+ 
+  labs(
+    x = "Timepoint",
+    color = "Treatment",
+    y = "Fatigue (FSS)",
+    title = "Fatigue by",
+    subtitle = "IFN-1 Score Tertile"
+  )+
+  theme(plot.subtitle = element_text(hjust = 0.5))+
+  theme_bw()+
+  scale_colour_discrete(name="Treatment",
+                         breaks=c("control", "exercise"),
+                         labels=c("Control", "Exercise"))
+
+
+  ggsave(
+  plot = pretty_plot_FSS_Quants,
+  filename = here("output","graphics","fatigue_IFN_quants_prettier.plot.jpg"),
+  width = 12
+)
+  #-------------------------
+  
+ ##IFN-1 Elevation plot
+  
+model_FSS_elevation_plot<-
+  plot(model.ifn1_elevation_interaction.FSS.lmm, type = "fit", 
+     obs.alpha = 0.2, 
+     ci = F, 
+     #ci.alpha = 0.1,
+     size.text = 12, 
+     colo="treat_constrain_at_base", 
+     facet = ~ifn1_elevated_at_baseline,
+     at = data.frame(sex = "F"))
+
+pretty_plot_FSS_Elevation <-
+  model_FSS_elevation_plot$plot+ 
+  labs(
+    x = "Timepoint",
+    color = "Treatment",
+    y = "Fatigue (FSS)",
+    title = "Fatigue by",
+    subtitle = "IFN-1 Score Elevation"
+  )+
+  theme(plot.subtitle = element_text(hjust = 0.5))+
+  theme_bw()+
+  scale_colour_discrete(name="Treatment",
+                         breaks=c("control", "exercise"),
+                         labels=c("Control", "Exercise"))
+
+
+  ggsave(
+  plot = pretty_plot_FSS_Elevation,
+  filename = here("output","graphics","fatigue_IFN_elevation_prettier.plot.jpg"),
+  width = 12
+)
+  
+  
+  # ----------
+  
+  ## PLOTS THAT REMOVE OUTLIERS BELOW
+  
+  
+  model.ifn1_quantile_interaction_no_outlier.FSS.lmm<-
+    lmm(
+  formula = 
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn1_quantile_at_baseline+
+    ifn1_quantile_at_baseline:timepoint+
+    ifn1_quantile_at_baseline:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>dplyr::filter(
+    id != "lup_001" )
+)
+  
+summary(model.ifn1_quantile_interaction_no_outlier.FSS.lmm)
+  
+model_FFS_Quants_no_outlier_plot<-
+  plot(model.ifn1_quantile_interaction_no_outlier.FSS.lmm, 
+      type = "fit", 
+      obs.alpha = 0.2, 
+      ci = F, 
+      #ci.alpha = 0.1,
+      size.text = 12, 
+      color="treat_constrain_at_base", 
+      facet = ~ifn1_quantile_at_baseline,
+      at = data.frame(sex = "F"))
+
+
+pretty_plot_FSS_Quants_no_outlier <-
+  model_FFS_Quants_no_outlier_plot$plot+ 
+  labs(
+    x = "Timepoint",
+    color = "Treatment",
+    y = "Fatigue (FSS)",
+    title = "Fatigue without outlier by",
+    subtitle = "IFN-1 Score Tertile"
+  )+
+  theme(plot.subtitle = element_text(hjust = 0.5))+
+  theme_bw()+
+  scale_colour_discrete(name="Treatment",
+                         breaks=c("control", "exercise"),
+                         labels=c("Control", "Exercise"))
+
+  ggsave(
+  plot = pretty_plot_FSS_Quants_no_outlier,
+  filename = here("output","graphics","fatigue_IFN_quants_no_outlier_prettier.plot.jpg"),
   width = 12
 )
 
 ## Graphics on change scores:
 library(tidyr)
-fatigue.data.wide<-questionnaires.combined.data %>% select(id, treatment, timepoint,
-                                         fatigue.mean, sex, m_1_2, m_1_2_geomean, m_3_4, m_3_4_geomean, m_5_12, m_5_12_geomean, ifn_1_el_sherb, ifn_1_el_sherb_geomean, ifn_2_el_sherb, ifn_2_el_sherb_geomean, ifn_2_siddiqi, ifn_2_siddiqi_geomean)%>% pivot_wider(
+fatigue.data.wide<-
+  questionnaires.combined.data |>
+  dplyr::select(id, treatment, timepoint,
+         fatigue.mean, sex, 
+         all_ifn_netto_t_test, #all_ifn_netto_t_test_geomean,
+         ifn_1_netto,#all_ifn_netto_t_test_geomean,
+         m_1_2, m_1_2_geomean, 
+         m_3_4, m_3_4_geomean, 
+         m_5_12, m_5_12_geomean, 
+         ifn_1_el_sherb, ifn_1_el_sherb_geomean, 
+         ifn_2_el_sherb, ifn_2_el_sherb_geomean, 
+         ifn_2_siddiqi, ifn_2_siddiqi_geomean)%>% pivot_wider(
   names_from = "timepoint",
-  id_cols = c("id", "treatment", "sex", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
-  values_from = c("fatigue.mean")
-)%>%mutate(
+  id_cols = c("id", "treatment", "sex", 
+              "all_ifn_netto_t_test", #"all_ifn_netto_t_test_geomean",
+              "ifn_1_netto",#"all_ifn_netto_t_test_geomean",
+              "m_1_2", "m_1_2_geomean", 
+              "m_3_4", "m_3_4_geomean", 
+              "m_5_12", "m_5_12_geomean", 
+              "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", 
+              "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", 
+              "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
+  values_from = c("fatigue.mean"))%>%
+  mutate(
   delta_fatigue = followup-baseline)
 
-fatigue_by_m.1.2 <- ggplot(fatigue.data.wide, 
-                           aes(x = m_1_2, y = delta_fatigue, colour = treatment)) +
+fatigue_by_IFN <- 
+  ggplot(fatigue.data.wide, 
+         aes(x = ifn_1_netto, 
+             y = delta_fatigue, 
+             colour = treatment)) +
   geom_point() +  
   geom_smooth(method="lm", se=T, level = 0.975) + 
         theme_bw() +
-  labs(title = "Change in Fatigue by treatment and IFN-\u03B1 score",
-       x = "IFN-\u03B1 score",
+  labs(title = "Change in Fatigue by treatment and IFN-1 score",
+       x = "IFN-1 score",
        y = "\u0394 FSS",
-       colour = "Intervention Group")
+       colour = "Treatment")+
+  scale_colour_discrete(name="Treatment",
+                         breaks=c("control", "exercise"),
+                         labels=c("Control", "Exercise"))
 
-fatigue_by_m.1.2
-ggsave(filename=here("Output","Graphics","fatigue_by_m_1_2.jpg"),
-  plot=fatigue_by_m.1.2)
 
-model.delta.fatigue<-lm(delta_fatigue ~ sex + m_1_2 * treatment, data = fatigue.data.wide)
+fatigue_by_IFN
+ggsave(filename=here("Output","Graphics","fatigue_by_IFN.jpg"),
+  plot=fatigue_by_IFN)
+
+
+lab_names <- list(
+  "F" = "Female",
+  "M" = "Male"
+)
+
+lab_sex <- function(variable,value){
+  return(lab_names[value])
+}
+
+fatigue_by_IFN + facet_wrap(~sex, labeller = lab_sex)
+ggsave(filename=here("Output","Graphics",paste0(
+          "fatigue_by_IFN_facetsex", 
+  ifelse(PP,"PP",""),
+  ".jpg")),
+  plot=fatigue_by_IFN + facet_wrap(~sex, labeller = lab_sex))
+
+
+model.delta.fatigue<-
+  lm(delta_fatigue ~ sex + ifn_1_netto * treatment, data = fatigue.data.wide)
 plot(model.delta.fatigue)
 summary(model.delta.fatigue)
 
-fatigue.data.wide.no.outlier <- fatigue.data.wide%>%filter(id!="lup_001") #lup001 did probably not understand the questionnaire
-fatigue_by_m.1.2_no_outlier <- ggplot(fatigue.data.wide.no.outlier, aes(x = m_1_2, y = delta_fatigue, colour = treatment)) +
+fatigue.data.wide.no.outlier <- 
+  fatigue.data.wide%>%
+  filter(id!="lup_001") #lup001 did probably not understand the questionnaire
+
+fatigue_by_IFN_no_outlier <- 
+  ggplot(fatigue.data.wide.no.outlier, aes(x = ifn_1_netto, y = delta_fatigue, colour = treatment)) +
   geom_point() +  geom_smooth(method="lm", se=T, level = 0.975) + 
         theme_bw()
-fatigue_by_m.1.2_no_outlier
+fatigue_by_IFN_no_outlier
 #ggplotly(fatigue_by_m.1.2)
 
-model.delta.fatigue.no.outlier<-lm(delta_fatigue ~ sex + m_1_2 * treatment, data = fatigue.data.wide.no.outlier)
+model.delta.fatigue.no.outlier<-
+  lm(delta_fatigue ~ sex + ifn_1_netto * treatment, data = fatigue.data.wide.no.outlier)
 plot(model.delta.fatigue.no.outlier)
 summary(model.delta.fatigue.no.outlier)
+```
+
+### Graphics Per Protocol Fatigue
+
+```{r}
+if(PP){
+fatigue.data.wide2<-
+  fatigue.data.wide |>
+  left_join(PP_list)|>
+  filter(!is.na(PP))|>
+  mutate(
+  pp_treat = paste0(treatment," PP=",PP)
+)
+
+fatigue_by_ifn1_PP_effect <- 
+  fatigue.data.wide2|>
+  ggplot(aes(x = ifn_1_netto, 
+             y = delta_fatigue, 
+             colour = pp_treat)) +
+  geom_point() +  
+  geom_smooth(method="lm", se=F, level = 0.975) + 
+  
+  scale_colour_manual(
+    labels = c("Control","Exercise not PP","Exercise PP"),
+    values = c("hotpink","darkgreen","lightblue")
+  )+
+  
+  labs(
+    title = "Fatigue By IFN-1 signature",
+    subtitle = "Per Protocol Analysis",
+    x = "IFN-1 Signature (SD)",
+    y = "\u0394 FSS",
+    colour = "Exercise Divided on Per Protocol")+
+  
+  theme_bw()
+
+ggsave(
+  plot = fatigue_by_ifn1_PP_effect,
+  filename = here("Output","Graphics","fatigue_by_IFN1_PP_effect.jpg")
+)
+fatigue_by_ifn1_PP_effect
+}
+
+
 ```
 
 ## SF-36 aggregate score models
@@ -397,7 +849,13 @@ summary(model71.main_effect.SF36Physical.lmm)
 
 
 model72.interaction.SF36Physical.lmm<-lmm(
-  formula = physical.component.score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  formula = physical.component.score ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -427,7 +885,13 @@ summary(model73.main_effect.SF36Mental.lmm)
 
 
 model74.interaction_effect.SF36Mental.lmm<-lmm(
-  formula = mental.component.score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  formula = mental.component.score ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -439,23 +903,63 @@ summary(model74.interaction_effect.SF36Mental.lmm)
 #linear.mixed.model.list$model74.interaction_effect.SF36Mental.lmm <-
  # model.tables(model74.interaction_effect.SF36Mental.lmm)
 #Minor but statistically significant difference in mental well being based on m_1_2 scores
+```
+
+### SF_36_Aggregate PP
+
+```{r}
+
 
 if(PP){
-  model75.interaction_PP.SF36Physical.lmm<-lmm(
-  formula = physical.component.score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  model71.main_effect.SF36Physical_PP.lmm<-lmm(
+  formula = physical.component.score ~ timepoint+treat:timepoint+sex,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data.PP
 )
-summary(model75.interaction_effect_PP.SF36Mental.lmm)
 
-  model76.interaction_effect_PP.SF36Mental.lmm<-lmm(
-  formula = mental.component.score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+plot(model71.main_effect.SF36Physical_PP.lmm, type=c("qqplot"))
+plot(model71.main_effect.SF36Physical_PP.lmm, type=c("scatterplot"))
+summary(model71.main_effect.SF36Physical_PP.lmm)
+
+  model72.interaction.SF36Physical_PP.lmm<-lmm(
+  formula = physical.component.score ~  
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data.PP
 )
-summary(model76.interaction_effect_PP.SF36Mental.lmm)
+summary(model72.interaction.SF36Physical_PP.lmm)
+
+model73.main_effect.SF36Mental_PP.lmm<-lmm(
+  formula = mental.component.score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data.PP
+)
+
+plot(model73.main_effect.SF36Mental_PP.lmm, type=c("qqplot"))
+plot(model73.main_effect.SF36Mental_PP.lmm, type=c("scatterplot"))
+summary(model73.main_effect.SF36Mental_PP.lmm)
+
+  model74.interaction_effect.SF36Mental_PP.lmm<-lmm(
+  formula = mental.component.score ~  
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data.PP
+)
+summary(model74.interaction_effect.SF36Mental_PP.lmm)
 
 
 }
@@ -466,8 +970,16 @@ summary(model76.interaction_effect_PP.SF36Mental.lmm)
 ```{r}
 for (IFNsig in list_of_scores_to_see_differences_over){
 model2.interaction.physical.lmm<-lmm(
-  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
-                        response="physical.component.score"),
+  formula = 
+    
+  reformulate(paste0("timepoint",
+                     "+treat+",
+                     "treat:timepoint+",
+                     IFNsig,
+                     "+timepoint:",IFNsig,
+                     "+treat:timepoint:",IFNsig,
+                     "+sex"),
+    response="physical.component.score"),
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -478,8 +990,15 @@ plot(model2.interaction.physical.lmm, type=c("qqplot"))
 plot(model2.interaction.physical.lmm, type=c("scatterplot"))
 
 model2.interaction.mental.lmm<-lmm(
-  formula = reformulate(paste0("timepoint+treat+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
-                        response="mental.component.score"),
+  formula = 
+  reformulate(paste0("timepoint",
+                     "+treat+",
+                     "treat:timepoint+",
+                     IFNsig,
+                     "+timepoint:",IFNsig,
+                     "+treat:timepoint:",IFNsig,
+                     "+sex"),
+    response="mental.component.score"),
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -505,13 +1024,17 @@ model74.main_effect.Qslaq.lmm<-lmm(
 plot(model74.main_effect.Qslaq.lmm, type=c("qqplot"))
 plot(model74.main_effect.Qslaq.lmm, type=c("scatterplot"))
 summary(model74.main_effect.Qslaq.lmm)
-linear.mixed.model.list$model74.main_effect.Qslaq.lmm <-
-  model.tables(model74.main_effect.Qslaq.lmm)
 
 
 
 model75.interaction_effect.Qslaq.lmm<-lmm(
-  formula = qslaq_score ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  formula = qslaq_score ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -520,8 +1043,6 @@ model75.interaction_effect.Qslaq.lmm<-lmm(
 plot(model75.interaction_effect.Qslaq.lmm, type=c("qqplot"))
 plot(model75.interaction_effect.Qslaq.lmm, type=c("scatterplot"))
 summary(model75.interaction_effect.Qslaq.lmm)
-linear.mixed.model.list$model75.interaction_effect.Qslaq.lmm <-
-  model.tables(model75.interaction_effect.Qslaq.lmm)
 
 model76.main_effect.Qslaq_symptom.lmm<-lmm(
   formula = qslaq_symptom_score ~ timepoint+treat:timepoint+sex,
@@ -533,13 +1054,16 @@ model76.main_effect.Qslaq_symptom.lmm<-lmm(
 plot(model76.main_effect.Qslaq_symptom.lmm, type=c("qqplot"))
 plot(model76.main_effect.Qslaq_symptom.lmm, type=c("scatterplot"))
 summary(model76.main_effect.Qslaq_symptom.lmm)
-linear.mixed.model.list$model76.main_effect.Qslaq_symptom.lmm <-
-  model.tables(model76.main_effect.Qslaq_symptom.lmm)
-
 
 
 model77.interaction_effect.Qslaq_symptom.lmm<-lmm(
-  formula = qslaq_symptom_score ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  formula = qslaq_symptom_score ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -548,7 +1072,7 @@ model77.interaction_effect.Qslaq_symptom.lmm<-lmm(
 plot(model77.interaction_effect.Qslaq_symptom.lmm, type=c("qqplot"))
 plot(model77.interaction_effect.Qslaq_symptom.lmm, type=c("scatterplot"))
 summary(model77.interaction_effect.Qslaq_symptom.lmm)
-#Minor but statistically significant difference in mental well being based on m_1_2 scores
+#Minor but statistically significant difference in mental well being based on ifn-1 scores
 
 model79.main_effect.slaq_vas.lmm<-lmm(
   formula = sla_qvas ~ timepoint+treat+treat:timepoint+sex,
@@ -562,7 +1086,13 @@ plot(model79.main_effect.slaq_vas.lmm, type=c("scatterplot"))
 summary(model79.main_effect.slaq_vas.lmm)
 
 model80.interaction_effect.slaq_vas.lmm<-lmm(
-  formula = sla_qvas ~ timepoint+treat+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex,
+  formula = sla_qvas ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data
@@ -571,7 +1101,117 @@ model80.interaction_effect.slaq_vas.lmm<-lmm(
 plot(model80.interaction_effect.slaq_vas.lmm, type=c("qqplot"))
 plot(model80.interaction_effect.slaq_vas.lmm, type=c("scatterplot"))
 summary(model80.interaction_effect.slaq_vas.lmm)
+```
+
+### Qslaq PP
+
+```{r}
+if(PP){
+  model74.main_effect.Qslaq_PP.lmm<-lmm(
+  formula = qslaq_score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = 
+    questionnaires.combined.data|>
+    dplyr::filter(PP)
+)
+
+plot(model74.main_effect.Qslaq_PP.lmm, type=c("qqplot"))
+plot(model74.main_effect.Qslaq_PP.lmm, type=c("scatterplot"))
+
+plot(model74.main_effect.Qslaq_PP.lmm, type=c("fit"), color = "treatment", obs.alpha = 0.5, ci = F,
+     time.var = "timepoint"#, facet = ~ cut_interval(m_1_2, 3)
+     )
+
+summary(model74.main_effect.Qslaq_PP.lmm)
+
+model75.interaction_effect.Qslaq_PP.lmm<-lmm(
+  formula = qslaq_score ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>
+    dplyr::filter(PP)
+)
+
+plot(model75.interaction_effect.Qslaq_PP.lmm, type=c("qqplot"))
+plot(model75.interaction_effect.Qslaq_PP.lmm, type=c("scatterplot"))
+summary(model75.interaction_effect.Qslaq_PP.lmm)
+plot(model75.interaction_effect.Qslaq_PP.lmm, type=c("fit"), color = "treatment", obs.alpha = 0.5, ci = F,
+     time.var = "timepoint", facet = ~ cut_interval(ifn_1_netto, 3)
+     )
+
+model76.main_effect.Qslaq_symptom_PP.lmm<-lmm(
+  formula = qslaq_symptom_score ~ timepoint+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>
+    dplyr::filter(PP)
+)
+
+plot(model76.main_effect.Qslaq_symptom_PP.lmm, type=c("qqplot"))
+plot(model76.main_effect.Qslaq_symptom_PP.lmm, type=c("scatterplot"))
+summary(model76.main_effect.Qslaq_symptom_PP.lmm)
+
+
+model77.interaction_effect.Qslaq_symptom_PP.lmm<-lmm(
+  formula = qslaq_symptom_score ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>
+    dplyr::filter(PP)
+)
+
+plot(model77.interaction_effect.Qslaq_symptom_PP.lmm, type=c("qqplot"))
+plot(model77.interaction_effect.Qslaq_symptom_PP.lmm, type=c("scatterplot"))
+summary(model77.interaction_effect.Qslaq_symptom_PP.lmm)
+plot(model77.interaction_effect.Qslaq_symptom_PP.lmm, type=c("fit"), color = "treatment", obs.alpha = 0.5, ci = F,
+     time.var = "timepoint", facet = ~ cut_interval(ifn_1_netto, 3)
+     )
 #Minor but statistically significant difference in mental well being based on m_1_2 scores
+
+model79.main_effect.slaq_vas_PP.lmm<-lmm(
+  formula = sla_qvas ~ timepoint+treat+treat:timepoint+sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>
+    dplyr::filter(PP)
+)
+
+plot(model79.main_effect.slaq_vas_PP.lmm, type=c("qqplot"))
+plot(model79.main_effect.slaq_vas_PP.lmm, type=c("scatterplot"))
+summary(model79.main_effect.slaq_vas_PP.lmm)
+
+model80.interaction_effect.slaq_vas_PP.lmm<-lmm(
+  formula = sla_qvas ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data|>
+    dplyr::filter(PP)
+)
+
+plot(model80.interaction_effect.slaq_vas_PP.lmm, type=c("qqplot"))
+plot(model80.interaction_effect.slaq_vas_PP.lmm, type=c("scatterplot"))
+summary(model80.interaction_effect.slaq_vas_PP.lmm)
+#Minor but statistically significant difference in mental well being based on m_1_2 scores
+}
 ```
 
 ## Exploratory Models
@@ -610,28 +1250,60 @@ ggsave(
   plot =Fatigue_Exploratory_Score_after_Followup,
   width = 12
 )
+
+fatigue_post_plot_with_ci<-
+  plot(model101.main_post_exercise_included.fatigue_as_FSS.lmm, 
+     type="fit", obs.alpha=0.25, color = "treatment", ci=T, ci.alpha = 0.05, 
+     size.text = 12, at = data.frame(sex="F"))
+
+Fatigue_Exploratory_Score_after_Followup_with_CI<-
+  fatigue_post_plot_with_ci$plot+
+  guides(color=guide_legend(title="Treatment Group"))+
+  labs(x="timepoint",
+       y="FSS",
+       title = "Fatigue after followup",
+       subtitle = "Exploratory Linear Mixed Model")
+
+ggsave(
+  filename= here("Output","Graphics","Fatigue_Exploratory_Score_after_Followup_with_CI.jpg"),
+  plot =Fatigue_Exploratory_Score_after_Followup_with_CI,
+  width = 12
+)
+
 #linear.mixed.model.list$model101.main_post_exercise_included.fatigue_as_FSS.lmm<-
  # model.tables(model101.main_post_exercise_included.fatigue_as_FSS.lmm, level =0.975)
 
-model102.post_exercise_interaction_m_1_2.fatigue_as_FSS.lmm<-lmm(
+model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm<-lmm(
   formula = 
-    fatigue.mean ~ timepoint+
-                             treat:timepoint:m_1_2,
+    fatigue.mean ~   
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data.with.post.followup
 )
 
-summary(model102.post_exercise_interaction_m_1_2.fatigue_as_FSS.lmm, level = 0.975)
-plot(model102.post_exercise_interaction_m_1_2.fatigue_as_FSS.lmm, 
-     type="fit", obs.alpha=0.25, color = "m_1_2")
+summary(model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm, level = 0.975)
+plot(model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm, 
+     type="fit", obs.alpha=0.25, color = "ifn_1_netto")
 ###TODO FIGURE OUT THE CONVERGENCE ISSUE!! Atm we are just trying to use the solution below
 
 library(lme4)
 
 lmer_version<-lmer(
   formula = 
-    fatigue.mean ~ timepoint+treat:timepoint+ m_1_2+treat:timepoint:m_1_2+sex+(1|id),
+    fatigue.mean ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat+
+    (1|id),
     data = questionnaires.combined.data.with.post.followup
 )
 
@@ -642,18 +1314,32 @@ An_lmer_version<-Anova(lmer_version, type = 3)
 summary(lmer_version)
 
 
-View(questionnaires.combined.data.with.post.followup)
 
-model102.post_exercise_interaction_m_1_2.fatigue_as_FSS.lmm<-lmm(
+model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm<-lmm(
   formula = 
     fatigue.mean ~ timepoint+
-                             treat:timepoint:m_1_2,
+                             treat:timepoint:ifn_1_netto,
   repetition = ~timepoint|id,
   structure = "UN",
   data = questionnaires.combined.data.with.post.followup
 )
 
-questionnaires.combined.data<-questionnaires.combined.data|>mutate(
+plot(
+  model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm, 
+  type = "scatterplot")
+plot(
+  model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm, 
+  type = "qqplot")
+plot(model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm, 
+     type="fit", 
+     ci = F,
+     obs.alpha=0.25, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+summary(model102.post_exercise_interaction_IFN.fatigue_as_FSS.lmm)
+
+questionnaires.combined.data<-
+  questionnaires.combined.data|>
+  mutate(
   VAS_fatigue=visuel_analog_træthedsskala_vats_målt_i_mm
 )
 
@@ -670,18 +1356,24 @@ summary(model.Vas_fatigue_main.lmm)
 plot(model.Vas_fatigue_main.lmm, type=c("qqplot"))
 plot(model.Vas_fatigue_main.lmm, type=c("scatterplot"))
 
-model.Vas_fatigue_interaction_m12.lmm<-
+model.Vas_fatigue_interaction_IFN1.lmm<-
   lmm(
     formula = 
-      VAS_fatigue ~ timepoint + treat:timepoint+m_1_2+treat:timepoint:m_1_2+ sex,
+    VAS_fatigue ~  
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
     repetition = ~timepoint|id,
     structure = "UN",
     data = questionnaires.combined.data
   )
 
-summary(model.Vas_fatigue_interaction_m12.lmm)
-plot(model.Vas_fatigue_interaction_m12.lmm, type=c("qqplot"))
-plot(model.Vas_fatigue_interaction_m12.lmm, type=c("scatterplot"))
+summary(model.Vas_fatigue_interaction_IFN1.lmm)
+plot(model.Vas_fatigue_interaction_IFN1.lmm, type=c("qqplot"))
+plot(model.Vas_fatigue_interaction_IFN1.lmm, type=c("scatterplot"))
 
 model.Vas_pain_main.lmm<-
   lmm(
@@ -696,81 +1388,351 @@ summary(model.Vas_pain_main.lmm)
 plot(model.Vas_pain_main.lmm, type=c("qqplot"))
 plot(model.Vas_pain_main.lmm, type=c("scatterplot"))
 
-model.Vas_pain_interaction_m12.lmm<-
+model.Vas_pain_interaction_IFN1.lmm<-
   lmm(
     formula = 
-      pain ~ timepoint + treat:timepoint+m_1_2+treat:timepoint:m_1_2+ sex,
+      pain ~ 
+      timepoint + 
+      treat:timepoint+
+      ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat+
+      sex,
     repetition = ~timepoint|id,
     structure = "UN",
     data = questionnaires.combined.data
   )
 
-summary(model.Vas_pain_interaction_m12.lmm)
-plot(model.Vas_pain_interaction_m12.lmm, type=c("qqplot"))
-plot(model.Vas_pain_interaction_m12.lmm, type=c("scatterplot"))
+summary(model.Vas_pain_interaction_IFN1.lmm)
+plot(model.Vas_pain_interaction_IFN1.lmm, type=c("qqplot"))
+plot(model.Vas_pain_interaction_IFN1.lmm, type=c("scatterplot"))
 
 
 ```
 
-### Save Modeltabels for aggregation in other file
+### Exploratory Models PP
 
 ```{r}
-saveRDS(object=linear.mixed.model.list,
-    file = here(
-      "Output",
-            paste0(
-              "LMM_List", 
-              ifelse(PP, "PP", "mITT"),
-                ".rds"
-        )
-      )
-    )
+
+if(PP){
+  model102.post_exercise_interaction_ifn1.fatigue_as_FSS_PP.lmm<-lmm(
+  formula = 
+    fatigue.mean ~ 
+    timepoint+
+    treat:timepoint+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = questionnaires.combined.data.with.post.followup|>
+    dplyr::filter(PP)
+)
+  plot(
+  model102.post_exercise_interaction_ifn1.fatigue_as_FSS_PP.lmm, 
+  type = "scatterplot")
+plot(
+  model102.post_exercise_interaction_ifn1.fatigue_as_FSS_PP.lmm, 
+  type = "qqplot")
+plot(model102.post_exercise_interaction_ifn1.fatigue_as_FSS_PP.lmm, 
+     type="fit", 
+     ci = F,
+     obs.alpha=0.25, 
+     color = "treatment", facet = ~ cut_interval(ifn_1_netto, 3))
+summary(model102.post_exercise_interaction_ifn1.fatigue_as_FSS_PP.lmm)
+
+questionnaires.combined.data<-
+  questionnaires.combined.data|>
+  mutate(
+  VAS_fatigue=visuel_analog_træthedsskala_vats_målt_i_mm
+)
+
+model.Vas_fatigue_main_PP.lmm<-
+  lmm(
+    formula = 
+      VAS_fatigue ~ timepoint + treat:timepoint+ sex,
+    repetition = ~timepoint|id,
+    structure = "UN",
+    data = questionnaires.combined.data|>
+      filter(PP)
+  )
+
+summary(model.Vas_fatigue_main_PP.lmm)
+plot(model.Vas_fatigue_main_PP.lmm, type=c("qqplot"))
+plot(model.Vas_fatigue_main_PP.lmm, type=c("scatterplot"))
+
+model.Vas_fatigue_interaction_ifn1_PP.lmm<-
+  lmm(
+    formula = 
+      VAS_fatigue ~ 
+      timepoint + 
+      treat:timepoint+
+      ifn_1_netto+
+      ifn_1_netto:timepoint+
+      ifn_1_netto:timepoint:treat+ 
+      sex,
+    repetition = ~timepoint|id,
+    structure = "UN",
+    data = 
+      questionnaires.combined.data|>
+      filter(PP)
+  )
+
+summary(model.Vas_fatigue_interaction_ifn1_PP.lmm)
+plot(model.Vas_fatigue_interaction_ifn1_PP.lmm, type=c("qqplot"))
+plot(model.Vas_fatigue_interaction_ifn1_PP.lmm, type=c("scatterplot"))
+
+model.Vas_pain_main_PP.lmm<-
+  lmm(
+    formula = 
+      pain ~ timepoint + treat:timepoint+ sex,
+    repetition = ~timepoint|id,
+    structure = "UN",
+    data = 
+      questionnaires.combined.data|>
+      filter(PP)
+  )
+
+summary(model.Vas_pain_main_PP.lmm)
+plot(model.Vas_pain_main_PP.lmm, type=c("qqplot"))
+plot(model.Vas_pain_main_PP.lmm, type=c("scatterplot"))
+
+model.Vas_pain_interaction_ifn1_PP.lmm<-
+  lmm(
+    formula = 
+      pain ~ 
+      timepoint + 
+      treat:timepoint+
+      ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat+ 
+      sex,
+    repetition = ~timepoint|id,
+    structure = "UN",
+    data = 
+      questionnaires.combined.data|>
+      dplyr::filter(PP)
+  )
+
+summary(model.Vas_pain_interaction_ifn1_PP.lmm)
+plot(model.Vas_pain_interaction_ifn1_PP.lmm, type=c("qqplot"))
+plot(model.Vas_pain_interaction_ifn1_PP.lmm, type=c("scatterplot"))
+}
+
+```
+
+##Contrast analyses These contrasts were made to check whether the models could have been misspecified in the SAP. And they aren't required.
+
+```{r eval = F}
+
+#Contrast analysis
+Cont_vec <-
+  rbind(
+    c( #At Baseline
+      1, #(Intercept)	
+      0, #timepointfollowup	
+      0, #sexM	
+      1, #all_ifn	
+      0, #timepointfollowup:treatexercise	
+      0, #timepointfollowup:all_ifn	
+      0  #timepointfollowup:treatexercise:all_ifn
+    ),
+    c(   #Control at FU
+      1, #(Intercept)	
+      1, #timepointfollowup	
+      0, #sexM	
+      1, #all_ifn	
+      0, #timepointfollowup:treatexercise	
+      1, #timepointfollowup:all_ifn	
+      0  #timepointfollowup:treatexercise:all_ifn
+    ),
+    c(   #Exercise at FU
+      1, #(Intercept)	
+      1, #timepointfollowup	
+      0, #sexM	
+      1, #all_ifn	
+      1, #timepointfollowup:treatexercise	
+      1, #timepointfollowup:all_ifn	
+      1  #timepointfollowup:treatexercise:all_ifn
+    ),
+    c(   #Difference Between Exercise and control at FU
+      1-1, #(Intercept)	
+      1-1, #timepointfollowup	
+      0-0, #sexM	
+      1-1, #all_ifn	
+      1-0, #timepointfollowup:treatexercise	
+      1-1, #timepointfollowup:all_ifn	
+      1-0  #timepointfollowup:treatexercise:all_ifn
+    ),
+    c(   #Difference in all_ifn on treat_exercise
+      1-1, #(Intercept)	
+      1-1, #timepointfollowup	
+      0-0, #sexM	
+      1-1, #all_ifn	
+      1-1, #timepointfollowup:treatexercise	
+      1-1, #timepointfollowup:all_ifn	
+      1-0  #timepointfollowup:treatexercise:all_ifn
+    ))
+	
+rownames(Cont_vec) <- c("Baseline","Control_FU","Exercise_FU", "Exercise_FU minus Control_FU", "Difference in ifn interaction")
+library(multcomp)
+summary(glht(model28.interaction_IFN.fatigue_as_FSS.lmm, linfct=Cont_vec), test=adjusted("none"))
+confint(glht(model28.interaction_IFN.fatigue_as_FSS.lmm, linfct=Cont_vec), test=adjusted("none"), level =0.975)
+summary(model28.interaction_IFN.fatigue_as_FSS.lmm)
+#model28a.interaction_m_1_2.fatigue_as_FSS.lmm<-lmm(
+#  formula = 
+#    fatigue.mean ~ 
+ #   timepoint+
+  #  treat:timepoint+
+  #  m_1_2+
+  #  treat:m_1_2+
+  #  sex,
+#  repetition = ~timepoint|id,
+#  structure = "UN",
+#  data = questionnaires.combined.data
+#)
+
+#summary(model28a.interaction_m_1_2.fatigue_as_FSS.lmm, level = 0.975)
+
+
+summary(glht(model30.interaction_all_IFN_no_outlier.fatigue_as_FSS.lmm, linfct=Cont_vec), test=adjusted("none"))
+confint(glht(model30.interaction_all_IFN_no_outlier.fatigue_as_FSS.lmm, linfct=Cont_vec), test=adjusted("none"), level =0.975)
+
+
+
+list_primary_models <- list(
+  model28.interaction_m_1_2.fatigue_as_FSS.lmm
+  )
+
+for (model in list_primary_models){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.975, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "Primary"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+
+
+#SF36 (secondary outcomes)
+list_secondary_models <- list(
+  model72.interaction.SF36Physical.lmm,
+  model74.interaction_effect.SF36Mental.lmm
+  )
+
+for (model in list_secondary_models){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "Secondary"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+#Exploratory Outcomes
+
+list_exploratory_models <- list(
+  model75.interaction_effect.Qslaq.lmm,
+  model77.interaction_effect.Qslaq_symptom.lmm,
+  model.Vas_fatigue_interaction_m12.lmm,
+  model.Vas_pain_interaction_m12.lmm
+  )
+
+for (model in list_exploratory_models){
+  glht_mod <- 
+  model|>
+  glht(linfct=Cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  method.multcomp="none")|>
+  mutate(
+    outcome = as.character(model$outcome[1]),
+    outcome_priority = "Exploratory"
+  )
+  
+  glht_mod|>
+  saveRDS(file = here("Output","Generalized linear hypothesis testing",
+                      paste0(model$outcome[1],
+                             "_glht_table.rds")))
+}
+```
+
+## Save Modeltables for aggregation in other file
+
+```{r}
+#saveRDS(object=linear.mixed.model.list,
+#    file = here(
+#      "Output",
+#            paste0(
+#              "LMM_List", 
+##              ifelse(PP, "PP", "mITT"),
+#                ".rds"
+#        )
+#      )
+#    )
 
   fatigue_lmm_list <- list(
                           FSS_main = 
-                            model.tables(model25.main.fatigue_as_FSS.lmm, level =0.975),
+                            model.tables(
+                              model25.main.fatigue_as_FSS.lmm, 
+                              level =0.975),
                           FSS_interaction = 
-                            model.tables(model28.interaction_m_1_2.fatigue_as_FSS.lmm, level =0.975))
+                            model.tables(
+                              model.IFN1.FSS.lmm, 
+                              level =0.975))
   
-  SF36_lmm_list <- list(main_sf36_physical = model.tables(model71.main_effect.SF36Physical.lmm),
-                        interaction_sf36_physical = model.tables(model72.interaction.SF36Physical.lmm),
-                        main_sf36_mental = model.tables(model73.main_effect.SF36Mental.lmm),
-                        interaction_sf36_mental = model.tables(model74.interaction_effect.SF36Mental.lmm))
+  SF36_lmm_list <- 
+    list(main_sf36_physical = 
+           model.tables(model71.main_effect.SF36Physical.lmm),
+         interaction_sf36_physical = 
+           model.tables(model72.interaction.SF36Physical.lmm),
+          main_sf36_mental = 
+           model.tables(model73.main_effect.SF36Mental.lmm),
+          interaction_sf36_mental = 
+           model.tables(model74.interaction_effect.SF36Mental.lmm))
   
-  Qslaq_lmm_list <- list(main_qslaq = model.tables(model74.main_effect.Qslaq.lmm),
-                         interaction_qslaq = model.tables(model75.interaction_effect.Qslaq.lmm),
-                         main_qslaq.symptom = model.tables(model76.main_effect.Qslaq_symptom.lmm),
-                         interaction_qslaq.symptom = model.tables(model77.interaction_effect.Qslaq_symptom.lmm))
+  Qslaq_lmm_list <- 
+    list(main_qslaq = 
+           model.tables(model74.main_effect.Qslaq.lmm),
+         interaction_qslaq = 
+           model.tables(model75.interaction_effect.Qslaq.lmm),
+         main_qslaq.symptom = 
+           model.tables(model76.main_effect.Qslaq_symptom.lmm),
+         interaction_qslaq.symptom =
+           model.tables(model77.interaction_effect.Qslaq_symptom.lmm))
   
   PROM_lmm_list <- list(
     VAS_fatigue_main = 
       model.tables(model.Vas_fatigue_main.lmm),
     VAS_fatigue_interaction =
-      model.tables(model.Vas_fatigue_interaction_m12.lmm),
+      model.tables(model.Vas_fatigue_interaction_IFN1.lmm),
     VAS_pain_main = 
       model.tables(model.Vas_pain_main.lmm),
     VAS_pain_interaction =
-      model.tables(model.Vas_pain_interaction_m12.lmm)
+      model.tables(model.Vas_pain_interaction_IFN1.lmm)
   )
   
 
-
-if(PP){
-  fatigue_lmm_list_PP <- list(
-  FSS_main = model.tables(model26.main_PP.fatigue_as_FSS.lmm, level =0.975),
-  FSS_interaction = model.tables(model29.interaction_m_1_2_PP.fatigue_as_FSS.lmm, level =0.975))
-  
-  SF36_lmm_list_PP <- list(interaction_sf36_physical_PP = model.tables(model75.interaction_PP.SF36Physical.lmm),
-                        interaction_sf36_mental_PP = model.tables(model76.interaction_effect_PP.SF36Mental.lmm))
-  
-  saveRDS(object = fatigue_lmm_list_PP,
-           file = here("Output","LMMlists","Fatigue_LMM_List_PP.rds"))
-  
-  saveRDS(object = SF36_lmm_list_PP,
-           file = here("Output","LMMlists","SF36_lmm_list_PP.rds"))
-  
-}
-  
 saveRDS(object = fatigue_lmm_list,
            file = here("Output","LMMlists","Fatigue_LMM_List.rds"))
   
@@ -785,8 +1747,68 @@ PROM_lmm_list|>saveRDS(
 
 ```
 
+### Save Model Tables PP
+
+```{r}
+
+if(PP){
+  fatigue_lmm_list_PP <- list(
+  FSS_main = 
+    model.tables(model26.main_PP.fatigue_as_FSS.lmm, level =0.975),
+  FSS_interaction = 
+    model.tables(model29.interaction_ifn1_PP.fatigue_as_FSS.lmm, level =0.975))
+  
+   SF36_lmm_list_PP <- 
+    list(main_sf36_physical = 
+           model.tables(model71.main_effect.SF36Physical_PP.lmm),
+         interaction_sf36_physical = 
+           model.tables(model72.interaction.SF36Physical_PP.lmm),
+          main_sf36_mental = 
+           model.tables(model73.main_effect.SF36Mental_PP.lmm),
+          interaction_sf36_mental = 
+           model.tables(model74.interaction_effect.SF36Mental_PP.lmm))
+  
+  Qslaq_lmm_list_PP <- 
+    list(main_qslaq = 
+           model.tables(model74.main_effect.Qslaq_PP.lmm),
+                         interaction_qslaq = model.tables(model75.interaction_effect.Qslaq_PP.lmm),
+                         main_qslaq.symptom = model.tables(model76.main_effect.Qslaq_symptom_PP.lmm),
+                         interaction_qslaq.symptom = model.tables(model77.interaction_effect.Qslaq_symptom_PP.lmm))
+  
+  PROM_lmm_list_PP <- list(
+    VAS_fatigue_main = 
+      model.tables(model.Vas_fatigue_main_PP.lmm),
+    VAS_fatigue_interaction =
+      model.tables(model.Vas_fatigue_interaction_ifn1_PP.lmm),
+    VAS_pain_main = 
+      model.tables(model.Vas_pain_main_PP.lmm),
+    VAS_pain_interaction =
+      model.tables(model.Vas_pain_interaction_ifn1_PP.lmm)
+  )
+  
+  
+  saveRDS(object = fatigue_lmm_list_PP,
+           file = here("Output","LMMlists","PP","Fatigue_LMM_List.rds"))
+  
+  saveRDS(object = SF36_lmm_list_PP,
+           file = here("Output","LMMlists","PP","SF36_lmm_list.rds"))
+  saveRDS(object = Qslaq_lmm_list_PP,
+           file = here("Output","LMMlists","PP","Qslaq_lmm_list.rds"))
+  PROM_lmm_list_PP|>saveRDS(
+  file = here("Output","LMMlists","PP","prom_lmm_list.rds"))
+}
+```
+
 ## The End
 
 ```{r}
 print("This is the end of Questionnaires.qmd")
+
+if(PP){
+  print("This was a PP analysis")
+} else {
+  if(mITT){
+    print("this was a mITT analysis")
+  }
+}
 ```
