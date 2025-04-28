@@ -17,7 +17,7 @@
 *******************************************************************************************************************
 
 
-This is the project for statistical analysis of the Type 1 interferon induced changes to exercise adaptations in systemic lupus erythematosus patients (nicknamed LUPEX for Lupus & Exercise) by Malte Lund Adamsen et al.
+This is the project for statistical analysis of the High Intensity Interval Training induced Adaptations to Aerobic Capacity and Fatigue in Patients with Systemic Lupus Erythematosus Trend Toward IFN-1 Dependence – A Randomized Controlled Single-center Clinical Trial.   (nicknamed LUPEX for Lupus & Exercise) by Malte Lund Adamsen et al.
 
 Much of the data is kept with Danish and English intertwined, as such, a non-Danish speaking reader would benefit immensely from having a translator ready or running it through a LLM for translating.
 
