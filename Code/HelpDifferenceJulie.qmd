@@ -1,0 +1,9 @@
+---
+title: "Help_Difference_Julie"
+format: html
+editor: visual
+---
+
+## Help Julie
+
+Hej Julie, jeg har lidt problemer med at få denne funktion til at give mig forskellen mellem m_1_2:followup:control/exercise

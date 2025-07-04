@@ -1,0 +1,35 @@
+---
+title: "Acute Bout Pulse Data Wrangling"
+format: html
+editor: visual
+---
+
+
+```{r}
+
+set.seed(42069)
+options(scipen=15)
+
+library(renv)
+library(beepr)
+library("readxl")
+library(dplyr)
+library(tidyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(flextable)
+library(butils)
+library(DescTools)
+library(LMMstar)
+library(plotly)
+library(multcomp)
+library(officer)
+
+#set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
+here::i_am("Code/Acute_Bout_Pulse_data_wrangling.qmd")
+options(scipen = 10)
+
+```

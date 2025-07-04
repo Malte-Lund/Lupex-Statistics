@@ -1,0 +1,29 @@
+---
+title: "Import from Søren"
+format: html
+editor: visual
+---
+
+# Import from Søren
+
+## Packages
+
+```{r}
+#install.packages("haven")
+library(haven)
+library(here)
+#install.packages("asciiSetupReader")
+library(asciiSetupReader)
+```
+
+## Data
+
+```{r}
+dir(here("input"))
+
+sav_from_soren<-read_sav(
+ file = here("input","FraSorenBX0616 LG2 Z normalized data_SJ20241106.sav")
+)
+
+read_spss(here("input","FraSorenSyntax_LUPEX_SJ20241105.sps" ))
+```

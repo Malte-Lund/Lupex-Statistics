@@ -1,0 +1,1759 @@
+---
+title: "VO2Max_QC"
+format: html
+editor: visual
+---
+
+## This document uses information that cannot be publicized, so it wont work from GitHub.
+
+Packages
+
+```{r}
+library(renv)
+library(readxl)
+library(dplyr)
+library(here)
+library(snakecase)
+library(lubridate)
+library(ggplot2)
+library(car)
+library(writexl)
+library(LMMstar)
+library(plotly)
+library(stringr)
+#renv::install("BSDA")
+#library(BSDA)
+#renv::init()
+#renv::install("zoo")
+library(zoo)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+here()
+
+mITT =T
+PP=F
+
+```
+
+## Set DIR for Screening, Baseline and Followup files
+
+```{r}
+Followup.directory <- 
+  "L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/VO2max/Followup"
+Baseline.directory <-
+  "L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/VO2max/Baseline"
+Screening.directory <-
+  "L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/VO2max/Screening"
+```
+
+## Load easytrial data
+
+This is for quality control and checking with the vector of times, if a vector of test_times is not supported, the QC script uses the maximal time
+
+```{r messages = F}
+VO2_metadata<- suppressWarnings(
+  read_excel(path = here("Data","EasyTrialRawDataNoDateofBirth.xlsx"), col_types = "guess")%>%
+    dplyr::select(
+    allocation_no, task_name,
+    `[dato_vo2max]`,`[initialer]`, 
+    `[er_vo2max_nået?]`:`[Tid vo2]`) %>%
+  dplyr::filter(!is.na(allocation_no)) %>%
+    dplyr::filter(!is.na(`[Tid vo2]`)) %>%
+    dplyr::filter(!is.na(`[kondital]`))%>% 
+  mutate(
+  id = to_snake_case(allocation_no),
+  aerobiccapacity_noted = `[kondital]`,
+  test_date = lubridate::ymd(`[dato_vo2max]`),
+  VO2_test_time_minutes = (as.numeric(as_datetime(`[Tid vo2]`)-as_datetime("1899-12-31"))),
+  VO2_test_time_seconds = 60*(as.numeric(as_datetime(`[Tid vo2]`)-as_datetime("1899-12-31"))) ,
+  borg = `[borg_skala_efter_test]` + 6,
+  timepoint = case_when(
+    grepl("ollow", task_name) ~ "followup",
+    grepl("aselin", task_name) ~ "baseline",
+    grepl("amtyk", task_name) ~ "screening",
+    T~NA_character_
+  ),
+  easytrialRERover1.1 = grepl("0", `[er_vo2max_nået?]`),
+  easytrialBorg_over_17 = grepl("1", `[er_vo2max_nået?]`),
+  easytrialPlateau = grepl("2", `[er_vo2max_nået?]`),
+  easytrialQuality_score = 
+    as.numeric(easytrialRERover1.1)+
+    as.numeric(easytrialBorg_over_17)+
+    as.numeric(easytrialPlateau),
+  easytrialQualityTest = easytrialQuality_score >= 2,
+  operator = `[initialer]`
+  #.keep = "unused"
+  )%>%
+  group_by(id, timepoint)%>%
+  filter(test_date == max(test_date))%>%
+  ungroup()%>%as.data.frame()
+  
+)
+
+
+VO2_metadata|>relocate(`[er_vo2max_nået?]`,easytrialBorg_over_17,borg, easytrialRERover1.1, easytrialPlateau, easytrialQuality_score, easytrialQualityTest)|>arrange(easytrialQualityTest)|>View()
+```
+
+## Function - VO2max Slope Detection
+
+```{r eval = T}
+
+getandtestvo2max <- function(
+directory ,
+metadata ,
+warmup.period = 300,
+shortest.analysed.test = warmup.period+120,
+sd.to.search.over = 2,
+end.period = 30,
+lag_time_stable_to_end = 0,
+id_start=1, #filenames must contain the ID at the points indicated by id_start and id_stop
+id_stop=6,
+width_to_sum_in_sec = 30,
+significant_difference_slope = 0.05,
+metadata_id = "id",
+metadata_timepoint = "timepoint", #this is to make sure you match the timepoint from the metadata with the name of the folder that the directory points to. 
+#atm. TIMEPOINT MUST BE LOWER CASE
+metadata_borg = "borg",
+metadata_time_seconds = "VO2_test_time_seconds",
+outpath = getwd(),
+dataframes = T,
+graph = FALSE,
+graph_filetype = ".png",
+models = FALSE,
+anonymize = T,
+method = "poole", #atm, my own method doesn't work that well, it crashes, often, and through numerous bug fixes, it still doesn't fit a line that well. Pooles is a lot easier to implement and works reasonably well.
+minimum.stable.period = 120,
+poolecutoffs =c(120,360)){
+
+#Find current timepoint from directory, this is 
+curr_timepoint <- tolower(word(directory, start = -1, sep = "/"))
+
+
+#Create out_data frame
+out_data <- data.frame( 
+                id = c(to_snake_case(stringr::str_sub(dir(directory), id_start, id_stop))),
+                from_file = dir(directory),
+                timepoint = curr_timepoint,
+                borg = NA_real_,
+                test.time = NA_real_,
+                aerobiccapacity = NA_real_,
+                VO2max = NA_real_,
+                HRmax = NA_real_,
+                MaxOxygenPulse = NA_real_,
+                maxRQ = NA_real_
+                )
+
+#This creates new variables in the metadata dataset, because I didn't know how to refer to them else.
+metadata$id<-metadata[metadata_id]
+metadata$timepoint<-metadata[metadata_timepoint]
+
+#If we need to create graphs or models, lets make some folders for that, also only create out_list if it's needed
+if(graph){
+  dir.create(file.path(outpath, "/graphics"), showWarnings = FALSE)
+#  out_list <- list()
+}
+
+if(models){
+  dir.create(file.path(outpath, "/models"), showWarnings = FALSE)
+ # out_list <- list()
+}
+
+
+for (filename in dir(directory)) {
+#Looping through the filenames in directory, filename must contain the ID at the points indicated by id_start and id_stop
+curr_id <- to_snake_case(stringr::str_sub(filename, id_start, id_stop))
+p<-paste0(directory,"/",filename)
+df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("...")))
+
+if (is.null(dim(df))|is.na(colnames(df)[1])){next}
+
+colnames(df)[1] <- "time.mad.excel.format"
+colnames(df)[colnames(df)=="VO2/Kg"]<-"VO2_per_kg"
+colnames(df)[colnames(df)=="VO2/kg"]<-"VO2_per_kg"
+
+#The metadata has the end of each test.
+test.time<-metadata%>%dplyr::filter( id==curr_id & timepoint==curr_timepoint)%>%pull(metadata_time_seconds)  
+  
+  
+df<-df%>%
+   mutate(
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  #filter(
+  #  time.seconds <=test.time
+  #)
+
+wvector<-sapply(seq_along(df$time.seconds), FUN=
+                             function(i) {which(df$time.seconds[-(seq_len(i))] >=
+                                                 df$time.seconds[i]+width_to_sum_in_sec)[1]})
+wvector<-case_when(is.na(wvector) ~ 6,
+                   T ~ wvector)
+df<-df%>%mutate(
+  from_file = filename,
+  id = curr_id,
+  time.minuts = round(time.seconds/60,2),
+  timepoint = curr_timepoint, 
+  aerob30secsum = #TODO clear up that this period depends on the input
+    zoo::rollapply(VO2_per_kg, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  vo2.30.sec.sum =
+    zoo::rollapply(`VO2`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_)  )
+
+  dato=suppressWarnings(
+    read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1])
+
+    
+  height = suppressWarnings(
+    read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1])
+
+    
+  weight = suppressWarnings(
+    read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1]
+  )
+  
+  
+  vo2max<-max(df$aerob30secsum, na.rm =T)
+  time_vo2max <- df$time.seconds[min(which(df$aerob30secsum==vo2max))]
+    
+if(!is.null(outpath)){
+  if(dataframes){
+    if(anonymize){df$from_file<-NULL}
+write_xlsx(x=df,
+           path = paste0(outpath,"/VO2maxWrittenByR_", curr_id,"_",curr_timepoint,".xlsx"))}}
+
+
+  borg<-metadata%>%dplyr::filter( id==curr_id & timepoint==curr_timepoint)%>%pull(metadata_borg)  
+  #Write the data we have to the out_data, the unique identifier is filename. It should be noted that the function will do silly things if two files have the same name, but I doubt they can.
+  out_data$id[out_data$from_file==filename] = curr_id
+  out_data$timepoint[out_data$from_file==filename]  = curr_timepoint
+  out_data$aerobiccapacity[out_data$from_file==filename]  = max(df$aerob30secsum, na.rm =T)
+  out_data$VO2max[out_data$from_file==filename]  = max(df$vo2.30.sec.sum, na.rm =T)
+  out_data$HRmax[out_data$from_file==filename]  = max(df$HR, na.rm =T)
+  out_data$MaxOxygenPulse[out_data$from_file==filename]  = max(df$`VO2/HR`, na.rm =T)
+  out_data$maxRQ[out_data$from_file==filename]  = max(df$RQ, na.rm =T)
+  out_data$height[out_data$from_file==filename]  = height
+  out_data$weight[out_data$from_file==filename]  = weight
+  out_data$date[out_data$from_file==filename]  = dato
+  out_data$borg[out_data$from_file==filename] = borg
+  out_data$test.time[out_data$from_file==filename] = test.time
+  
+  out_data$vo2maxaftertestend[out_data$from_file==filename] = df$time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)] > test.time
+if(df$time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)] > test.time){next}
+
+
+df.warmup <- df %>% filter(time.seconds<=warmup.period)
+mean.VO2kg.warmup <- mean(df.warmup$`VO2/Kg`, na.rm = T)
+sd.VO2kg.warmup <- sd(df.warmup$`VO2/Kg`, na.rm = T)
+
+if (is.null(shortest.analysed.test)){
+shortest.analysed.test=warmup.period+120}
+
+#If maximal aerobic capacity is after the shortest analysed test, analyse it, if not, note it and break
+if(df$time.seconds[match(max(df$aerob30secsum, na.rm =T), df$aerob30secsum)]>=shortest.analysed.test){
+
+#if the test is longer than the shortest analysed test analyse it, if not note it and break 
+if(max(df$time.seconds,na.rm=T)>=shortest.analysed.test ){
+  #The tests especially Pooles need a test.time to run, so we'll define it this way if it isn't defined.
+if(is.na(test.time)){
+  test.time <- max(df$time.seconds, na.rm =T)
+  if(test.time<warmup.period){next}}
+#Pooles method is quite simple, he takes the time 6 to 2 minutes before the end of the test, creates a line, then creates a new line at the last 2 minutes and compares the regressions.
+  
+if(method == "poole"){
+
+  df.stable <- df%>%
+    dplyr::filter(time.seconds >= warmup.period)%>%
+    dplyr::filter(time.seconds >= test.time-poolecutoffs[2]) %>%
+    dplyr::filter(time.seconds < test.time-poolecutoffs[1]) %>%
+    mutate(period = "stable")
+  df.end <- df%>%
+    dplyr::filter(time.seconds >= test.time-poolecutoffs[1])%>%
+    dplyr::filter(time.seconds <= test.time)%>%
+    mutate(period = "end")
+} 
+if(method == "MLA"){
+#  df.no.warmup <- df%>%dplyr::filter(time.seconds > warmup.period)
+  
+  #Below is the complicated code I tried to implement, I have made a simpler solution further below
+#Find timepoint were vo2 is above x SD of warmup period. (So we dont start the curve flat)
+  
+#if( mean.VO2kg.warmup + 
+#    sd.to.search.over*
+#    sd.VO2kg.warmup         < vo2max){
+#  time_vo2_over_warmup <- 
+#    df.no.warmup$time.seconds[min(which(df.no.warmup$aerob30secsum > 
+#                                          mean.VO2kg.warmup + 
+#                                          sd.to.search.over*
+#                                          sd.VO2kg.warmup))]} else {
+#If the test never gets a VO2max thats 2SD abvoe the mean in the warmup. The stable and end periods are likely similar, so we just start the VO2max at the end of the warmup period
+# time_vo2_over_warmup <- warmup.period  }
+  
+
+#  if (time_vo2_over_warmup < test.time -
+#                              end.period - 
+#                              lag_time_stable_to_end & 
+#      time_vo2_over_warmup > warmup.period){
+#    stable_start_time <- time_vo2_over_warmup
+#  }else{
+#    stable_start_time <- warmup.period
+#  }
+#Find timepoint were VO2 is within x SD of VO2max (so we dont end the curve at plateau)  
+#  first_time_vo2_within_x_sd_of_vo2max <- 
+#    df.no.warmup$time.seconds[min(which(df.no.warmup$aerob30secsum > 
+#                                          vo2max - 
+#                                          sd.to.search.over*
+#                                          sd.VO2kg.warmup))]
+  
+
+#If the stable period is less than the minimum allowed stable period, extend it to the minimum allowed stable period.
+#  if (
+#    first_time_vo2_within_x_sd_of_vo2max - stable_start_time < minimum.stable.period
+#  ) {
+#    stable_end_time <- stable_start_time + minimum.stable.period
+#  } else { #Else, use the first time vo2max is within x sd of VO2max as the end for the stable
+#    stable_end_time <- first_time_vo2_within_x_sd_of_vo2max
+#  }
+  
+#  df.stable <- df%>%
+#    dplyr::filter(
+#    time.seconds >= stable_start_time) %>%
+#    dplyr::filter( #The lag is deducted here, instead of deducting it higher up and adding it again to the end.
+#    time.seconds < stable_end_time - lag_time_stable_to_end
+#  )
+  
+  #Define the plateau at the end, it should be all times that are less than test.time & less than 30 sec after   the VO2max. If the VO2 falls below VO2max - 2SD it is probably a mask failure at test end and should be removed.
+  
+  #Find the time after VO2max were VO2 is more than x sd under vo2max
+#  df.after.max <- df %>% dplyr::filter(
+#    time.seconds >= time_vo2max)
+#  time_vo2_falls_again <- df.after.max$time.seconds[min(which(
+#    df.after.max$aerob30secsum <  vo2max - 
+#                                  sd.to.search.over*
+#                                  sd.VO2kg.warmup))]
+#  
+#  plateau_end <- min(c(time_vo2max + end.period, 
+#                       test.time, 
+#                       time_vo2_falls_again),
+#                     na.rm =T)
+  
+
+    #if the plateau is less than the end period, expand it to end period
+#  if(plateau_end - stable_end_time < end.period){
+#    plateau_end <- stable_end_time + end.period
+# }
+  
+#  df.end <- df %>%
+#    dplyr::filter(
+#    time.seconds >= stable_end_time
+#  ) %>%dplyr::filter(
+#    time.seconds <= plateau_end
+#  )
+
+  
+#Method MLA Simplified    
+  df.stable <- df %>% 
+    dplyr::filter(
+    time.seconds >= warmup.period)%>% 
+    dplyr::filter(
+    time.seconds < time_vo2max - end.period - lag_time_stable_to_end)  
+  
+    
+    df.end <- df %>%
+      dplyr::filter(
+      time.seconds >= time_vo2max - end.period
+    ) %>% dplyr::filter(
+      time.seconds <= time_vo2max + end.period
+    ) %>% dplyr::filter(
+      time.seconds <= test.time
+    )
+}
+#Okay so we've defined which data should be included in each data frame. Which is really the difference between Pooles method and mine. Poole then suggest using the same method for validation as CS uses, but I used a significance testing approach which is a little more lenient.
+if (nrow(df.end)<2){next} #We are fitting two linear models, we need at least 2 data points in both DFs
+if (nrow(df.stable)<2){next}
+if (min(df.end$time.seconds,na.rm = T) > 6000) {next}
+if (max(df.end$time.seconds,na.rm = T) < 0) {next}
+
+  df.end <- df.end %>%mutate(period = "end")
+  df.stable<-df.stable %>% mutate (period = "stable")
+
+df.joined <- rbind(
+  df.end , df.stable) %>%
+  mutate(period = factor( period, levels = c("stable", "end")))
+
+lm.joined <- lm(aerob30secsum ~ period+time.seconds+time.seconds:period, data = df.joined)
+
+require(car)
+anova.lm.joined<-car::Anova(lm.joined, type = 3, singular.ok = T)
+p_diff <- anova.lm.joined$`Pr(>F)`[4]
+end.steeper.than.stable <- lm.joined$coefficients[4] > 0
+
+
+if(graph){
+  graphic<-df.joined %>%ggplot(aes(x=time.seconds, y = aerob30secsum, colour=period)) + geom_point()+stat_smooth(method="lm")
+  ggsave(filename = paste0(outpath , "/graphics/","graph_",curr_timepoint,"_",curr_id,graph_filetype),
+         plot = graphic)
+  #I wanted to output a list, it didn't really work. Especially with the ggplot objects
+#curr_graph <- list(data.frame(timepoint=curr_timepoint,id=curr_id, graph=graphic))
+#out_list<-append(out_list,curr_graph)
+  
+}
+
+if(models){
+  saveRDS(object=lm.joined, file = paste0(outpath,"/models/",curr_timepoint,"_",curr_id,".rds" ))
+#I wanted to output a list, it didn't really work. Especially with the ggplot objects  
+#curr_model <- list(data.frame(matrix(timepoint=curr_timepoint,id=curr_id, lm=lm.joined)))
+#out_list<-append(out_list,curr_model)
+}
+
+lmtestMLA <- case_when(end.steeper.than.stable ~ F,
+                       p_diff < significant_difference_slope ~ T,
+                       T ~ F)
+end.half.stable <- lm.joined$coefficients[4]+lm.joined$coefficients[3]<=(lm.joined$coefficients[3])/2
+
+
+lmtestCS <- end.half.stable #Also Pooles method
+            
+
+  out_data$lmtestMLA[out_data$from_file==filename] <- lmtestMLA
+  out_data$lmtestCS[out_data$from_file==filename] <- lmtestCS
+  out_data$endsteep[out_data$from_file==filename]  <- end.steeper.than.stable
+  out_data$end.half.stable[out_data$from_file==filename]  <- end.half.stable
+  out_data$tooshort[out_data$from_file==filename]  <- F
+  out_data$aerobmaxinwarmup[out_data$from_file==filename]  <- F
+  
+} else{
+  out_data$tooshort[out_data$from_file==filename]  <- T
+    }
+} else {
+   out_data$aerobmaxinwarmup[out_data$from_file==filename]  <- T
+}
+}
+if (method == "MLA"){ #The main difference between mine and CS version is that I weigh the lmtest less, because I don't think plateau can ever be decided in a yes/no question and therefore use the other guidelines equivalently. 
+out_data<-out_data %>% mutate(
+  Quality_Score_MLA = 
+    case_when(
+              borg >= 17 ~ 1,
+              borg < 17 ~ 0,
+              T~NA_real_) + 
+    case_when (lmtestMLA ~ 1,
+               lmtestMLA == F ~ 0,
+              T~NA_real_) + 
+    case_when ( maxRQ >=1.1 ~ 1,
+                maxRQ <1.1 ~ 0,
+              T~NA_real_),
+  
+  QualityMeasurementMLA = Quality_Score_MLA >= 2)
+  }
+out_data<-out_data %>% mutate(Quality_Score_CS = 
+    case_when(
+              borg >= 17 ~ 1,
+              borg < 17 ~ 0,
+              T~NA_real_) + 
+    case_when (lmtestCS ~ 2,
+               lmtestCS == F ~ 0,
+              T~NA_real_) + 
+    case_when ( maxRQ >=1.1 ~ 1,
+                maxRQ <1.1 ~ 0,
+              T~NA_real_),
+    QualityMeasurementCS = Quality_Score_CS >= 2)
+
+
+return(out_data)
+}
+```
+
+## Run the function
+
+```{r}
+data.followup.poole <- getandtestvo2max(Followup.directory, metadata = VO2_metadata, 
+                                        outpath = here("Data","VO2FromR","poole"),
+                                        method="poole", graph = T, models = T)
+data.baseline.poole <- getandtestvo2max(Baseline.directory, metadata = VO2_metadata, outpath = here("Data","VO2FromR","poole"),method="poole", graph = T, models = T)
+data.screening.poole <- getandtestvo2max(Screening.directory, metadata = VO2_metadata, outpath = here("Data","VO2FromR","poole"),method="poole", graph = T, models = T)
+
+
+data.followup <- getandtestvo2max(Followup.directory, metadata = VO2_metadata, outpath = here("Data","VO2FromR"),method = "MLA", graph = T, models = T)
+data.baseline <- getandtestvo2max(Baseline.directory, metadata = VO2_metadata, outpath = here("Data","VO2FromR"),method = "MLA", graph = T, models = T)
+data.screening <- getandtestvo2max(Screening.directory, metadata = VO2_metadata, outpath = here("Data","VO2FromR"),method = "MLA", graph = T, models = T)
+```
+
+## Merge easytrial quality control
+
+```{r}
+#GET THE OPERATOR FROM THIS:
+vo2.operator <- read_excel(path =  here("Data", paste0("vo2max_mITT",                                   ".xlsx")))%>%
+  dplyr::select(id, timepoint, operator)
+
+EasytrialQuality <- VO2_metadata %>% 
+  dplyr::select(id, timepoint, 
+                borg, aerobiccapacity_noted, 
+                test_date, VO2_test_time_seconds, easytrialPlateau,
+                easytrialQuality_score, easytrialQualityTest)%>%
+  rename(       borg_easytrial = borg)%>%left_join(vo2.operator, by = join_by(id,timepoint))
+```
+
+#Write Data anonymized
+
+```{r}
+data_vo2max_QC<-
+  rbind(data.screening, data.followup, data.baseline)%>%
+  dplyr::select(-from_file)%>%left_join(
+  EasytrialQuality, by=c("id", "timepoint"))%>%relocate(
+    id, timepoint, aerobiccapacity, aerobiccapacity_noted, QualityMeasurementCS, easytrialQualityTest
+  )
+
+write_xlsx(
+  data_vo2max_QC,
+  path = here("Output","VO2maxQC","Data.VO2MAXQC.xlsx")
+)
+
+data_vo2max_QC_poole<-
+  rbind(data.screening.poole, data.followup.poole, data.baseline.poole)%>%
+  dplyr::select(-from_file)%>%
+  left_join(
+  EasytrialQuality, by=c("id", "timepoint"))%>%
+  relocate(
+    id, timepoint, aerobiccapacity, aerobiccapacity_noted, QualityMeasurementCS, easytrialQualityTest
+  )
+
+write_xlsx(
+  data_vo2max_QC_poole,
+  path = here("Output","VO2maxQC","Data.VO2MAXQC_poole.xlsx")
+)
+
+data_vo2max_QC_poole <- data_vo2max_QC_poole %>% mutate(
+  aerobdiff = aerobiccapacity -aerobiccapacity_noted
+)%>%relocate(id, timepoint, operator, aerobdiff)
+```
+
+##Assess Quality Measurements
+
+```{r}
+
+p<-data_vo2max_QC_poole %>% ggplot (aes(x=aerobiccapacity, 
+                                        y = aerobiccapacity_noted, 
+                                     colour = operator,
+                                     timepoint = timepoint,
+                                     id = id))+
+  geom_point()+
+  stat_smooth(method = "lm")
+library(plotly)
+p
+
+lm.test<-lm(aerobiccapacity_noted~aerobiccapacity+operator, data = data_vo2max_QC_poole)
+summary(lm.test)
+
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+bars.poole <- data_vo2max_QC_poole |>
+  dplyr::select(operator, QualityMeasurementCS)|>
+  gather(key, value, -operator) %>%
+  ggplot(.,(aes(operator, as.numeric(value), fill = operator))) +
+  stat_summary(fun.y = sum, geom = "bar", position = "dodge") 
+bars.poole
+
+table(data_vo2max_QC_poole$QualityMeasurementCS)
+
+data_vo2max_QC_poole|>
+  count(QualityMeasurementCS,operator)|>
+  mutate(Quality=as.factor(QualityMeasurementCS))|>
+  ggplot(aes(x = QualityMeasurementCS, y = n, fill = operator))+
+  stat_summary(fun.y = sum, geom = "bar", position = "dodge")
+
+data_vo2max_QC_poole|>
+  count(QualityMeasurementCS,operator)
+
+data_vo2max_QC|>
+  count(QualityMeasurementCS,operator)|>
+  mutate(Quality=as.factor(QualityMeasurementCS))|>
+  ggplot(aes(x = QualityMeasurementCS, y = n, fill = operator))+
+  stat_summary(fun.y = sum, geom = "bar", position = "dodge") 
+
+data_vo2max_QC|>
+  count(QualityMeasurementCS,operator)
+data_vo2max_QC|>
+  count(QualityMeasurementMLA,operator)|>
+  mutate(Quality=as.factor(QualityMeasurementMLA))|>
+  ggplot(aes(x = QualityMeasurementMLA, y = n, fill = operator))+
+  stat_summary(fun.y = sum, geom = "bar", position = "dodge") 
+
+data_vo2max_QC|>
+  count(QualityMeasurementMLA,operator)
+
+quality_differences.MLAmethod<-left_join(
+  data_vo2max_QC|>
+  count(QualityMeasurementMLA,operator, name = "n_mla"),
+  data_vo2max_QC|>
+  count(operator, name = "total_MLA")
+)|>
+  mutate(pctMLA = n_mla/total_MLA*100)|>
+  arrange(operator)|>
+  relocate(operator)
+write_xlsx(
+  quality_differences.MLAmethod,
+  path = here("Output","VO2maxQC","quality_differences.MLAmethod.xlsx")
+)
+
+quality_differences.CSmethod<-left_join(
+  data_vo2max_QC|>
+  count(QualityMeasurementCS,operator, name = "n_cs"),
+  data_vo2max_QC|>
+  count(operator, name = "total_CS")
+)|>
+  mutate(pct_CS = n_cs/total_CS*100)|>arrange(operator)|>relocate(
+  operator)
+write_xlsx(
+  quality_differences.CSmethod,
+  path = here("Output","VO2maxQC","quality_differences.CSmethod.xlsx")
+)
+
+
+quality_differences.Poolemethod<-left_join(
+  data_vo2max_QC_poole|>
+  count(QualityMeasurementCS,operator, name = "n_poole"),
+  data_vo2max_QC_poole|>
+  count(operator, name = "total_poole")
+)|>
+  mutate(pct_poole = n_poole/total_poole*100,
+          QualityPoole = QualityMeasurementCS)|>
+  arrange(operator)|>
+  relocate(  operator)
+write_xlsx(
+  quality_differences.Poolemethod,
+  path = here("Output","VO2maxQC","quality_differences.Poolemethod.xlsx")
+)
+
+
+quality_differences.EasyTrial<-left_join(
+  data_vo2max_QC|>
+  count(easytrialQualityTest,operator),
+  data_vo2max_QC|>
+  count(operator, name = "total")
+)|>
+  mutate(pct = n/total*100)|>
+  arrange(operator)|>
+  relocate(operator)
+write_xlsx(
+  quality_differences.EasyTrial,
+  path = here("Output","VO2maxQC","quality_differences.EasyTrial.xlsx")
+)
+
+```
+
+#-------------- ##THIS IS DEPRECATED CODE #-------------- Deprecated parts of the function
+
+```{r eval = F}
+  
+  if ( !max(df.no.warmup$aerob30secsum,na.rm=T) < mean.VO2kg.warmup + sd.to.search.over*sd.VO2kg.warmup){
+  time.over.aerob.after.warmup<- df.no.warmup$time.seconds[min(which(df.no.warmup$aerob30secsum >
+                      mean.VO2kg.warmup + sd.to.search.over*sd.VO2kg.warmup), na.rm =T)]
+  
+  if(time.over.aerob.after.warmup > warmup.period & time.over.aerob.after.warmup < test.time-end.period){
+    stable_start_time <- time.over.aerob.after.warmup
+  } else (
+    stable_start_time<-warmup.period
+  )}else(stable_start_time<-warmup.period)
+
+stable_end_time <- df$time.seconds[match(max(df$aerob30secsum, na.rm =T), df$aerob30secsum)]-end.period
+
+
+
+first.time.vo2.is.close.to.vo2max <- 
+  df$timeseconds[min(which(df$`VO2/Kg` >                                            max(df$aerob30secsum,na.rm=T) - sd.to.search.over*sd.VO2kg.warmup))]  
+
+if(length(first.time.vo2.is.close.to.vo2max)>=1){
+  if(first.time.vo2.is.close.to.vo2max < stable_end_time & 
+   stable_end_time > stable_start_time + end.period){
+  stable_end_time <- first.time.vo2.is.close.to.vo2max
+}}
+
+
+
+  df.stablework<- df%>% 
+  dplyr::filter(
+  time.seconds >= stable_start_time)%>%
+  dplyr::filter(
+    time.seconds < stable_end_time - lag_time_stable_to_end)
+
+df.end<- df %>% 
+  dplyr::filter( 
+  time.seconds < stable_end_time) %>%
+  #dplyr::filter( 
+  #time.seconds <= test.time)%>% 
+  dplyr::filter(
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]+end.period)
+  #dplyr::filter( 
+  #time.seconds <= test.time)%>% 
+  
+} 
+
+
+
+    
+```
+
+# Loop that creates a data frame for each timepoint
+
+## Baseline
+
+```{r messages = F eval = F}
+
+directory = Baseline.directory
+#directories = directories
+warmup.period = 300
+#filename = dir(directory)[26]
+shortest.analysed.test = warmup.period+120
+sd.to.search.over = 2
+end.period = 30
+lag_time_stable_to_end = 0
+id_start<-1
+id_stop<-6
+width_to_sum_in_sec <- 30
+significant_difference_slope = 0.05
+metadata = VO2_metadata
+metadata_borg = "borg"
+metadata_time_seconds = "VO2_test_time_seconds"
+outpath = "L:/LovbeskyttetMapper/LupEx/TMF/13 Analyser/From R/"
+
+curr_timepoint <- tolower(word(directory, start = -1, sep = "/"))
+
+out_data_baseline <- data.frame( 
+                id = c(to_snake_case(stringr::str_sub(dir(directory), id_start, id_stop))),
+                timepoint = curr_timepoint,
+                from_file = dir(directory),
+                aerobiccapacity = NA_real_,
+                VO2max = NA_real_,
+                HRmax = NA_real_,
+                MaxOxygenPulse = NA_real_,
+                maxRQ = NA_real_
+                )
+
+
+time1 <- Sys.time()
+
+for (filename in dir(directory)) {
+
+curr_id <- to_snake_case(stringr::str_sub(filename, id_start, id_stop))
+p<-paste0(directory,"/",filename)
+df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("...")))
+
+if (is.null(dim(df))|is.na(colnames(df)[1])){next}
+
+colnames(df)[1] <- "time.mad.excel.format"
+  
+df<-df%>%
+   mutate(
+    #time.mad.dec = t,
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+   # t = lubridate::period_to_seconds(time.mmss)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+
+wvector<-sapply(seq_along(df$time.seconds), FUN=
+                             function(i) {which(df$time.seconds[-(seq_len(i))] >=
+                                                 df$time.seconds[i]+width_to_sum_in_sec)[1]})
+wvector<-case_when(is.na(wvector) ~ 6,
+                   T ~ wvector)
+
+
+
+df<-df%>%mutate(
+  from_file = filename,
+  id = curr_id,
+  time.minuts = round(time.seconds/60,2),
+  timepoint = curr_timepoint, 
+  aerob30secsum = #TODO clear up that this period depends on the input
+    zoo::rollapply(`VO2/Kg`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  vo2.30.sec.sum =
+    zoo::rollapply(`VO2`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_))
+
+  dato=suppressWarnings(
+    read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1]
+    )
+  height = suppressWarnings(
+    read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1]
+    )
+  weight = suppressWarnings(
+    read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1]
+    )
+
+write_xlsx(x=df,
+           path = paste0(outpath,"VO2maxWrittenByR_", curr_id,"_",curr_timepoint,".xlsx"))
+
+test.time<-metadata%>%dplyr::filter( id==curr_id & timepoint==curr_timepoint)%>%pull(metadata_time_seconds)  
+borg<-metadata%>%dplyr::filter( id==curr_id & timepoint==curr_timepoint)%>%pull(metadata_borg)  
+ 
+
+#out_data_baseline %>% mutate(
+#  id = curr_id,
+#  borg = borg,
+#  test.time = test.time,
+#  timepoint = curr_timepoint,
+#  aerobsum = max(df$aerob30secsum, na.rm =T),
+#  HRmax = max(df$HR, na.rm =T),
+#  MaxOxygenPulse = max(df$`VO2/HR`, na.rm =T),
+#  maxRQ = max(df$RQ, na.rm =T)
+#)
+
+  out_data_baseline$id[out_data_baseline$from_file==filename] = curr_id
+  out_data_baseline$timepoint[out_data_baseline$from_file==filename]  = curr_timepoint
+  out_data_baseline$aerobiccapacity[out_data_baseline$from_file==filename]  = max(df$aerob30secsum, na.rm =T)
+  out_data_baseline$VO2max[out_data_baseline$from_file==filename]  = max(df$vo2.30.sec.sum, na.rm =T)
+  out_data_baseline$HRmax[out_data_baseline$from_file==filename]  = max(df$HR, na.rm =T)
+  out_data_baseline$MaxOxygenPulse[out_data_baseline$from_file==filename]  = max(df$`VO2/HR`, na.rm =T)
+  out_data_baseline$maxRQ[out_data_baseline$from_file==filename]  = max(df$RQ, na.rm =T)
+  out_data_baseline$height[out_data_baseline$from_file==filename]  = height
+  out_data_baseline$weight[out_data_baseline$from_file==filename]  = weight
+  out_data_baseline$date[out_data_baseline$from_file==filename]  = dato
+  out_data_baseline$borg[out_data_baseline$from_file==filename] = borg
+  out_data_baseline$test.time[out_data_baseline$from_file==filename] = test.time
+
+  
+df.warmup <- df %>% filter(time.seconds<=warmup.period)
+mean.VO2kg.warmup <- mean(df.warmup$`VO2/Kg`, na.rm = T)
+sd.VO2kg.warmup <- sd(df.warmup$`VO2/Kg`, na.rm = T)
+
+if (is.null(shortest.analysed.test)){
+shortest.analysed.test=warmup.period+120}
+
+if (df$time.seconds[match(max(df$aerob30secsum, na.rm =T), df$aerob30secsum)]>=shortest.analysed.test){
+
+if(max(df$time.seconds,na.rm=T)>=shortest.analysed.test ){
+
+  stable_start_time<-min(df$time.seconds[min(which(df$aerob30secsum>
+                             mean.VO2kg.warmup+
+                               sd.to.search.over*sd.VO2kg.warmup), na.rm =T)], 
+                       warmup.period, na.rm=T) 
+
+df.stablework<- df%>% filter(
+  time.seconds > stable_start_time & 
+    time.seconds <= time.seconds[match(max(df$aerob30secsum,na.rm=T),
+                       df$aerob30secsum)]-lag_time_stable_to_end-end.period)
+
+df.end<- df %>% filter(
+    time.seconds > time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-end.period &
+    time.seconds < test.time)
+
+df.end.start.time <- min(df.end$time.seconds, na.rm =T)
+df.stable.start.time <- min(df.stablework$time.seconds, na.rm =T)
+
+df.overlapped <- rbind(
+  df.end %>% mutate( period = "end"),
+  df.stablework %>% mutate (period = "stable")
+) %>% mutate(period = factor( period, levels = c("stable", "end")))
+
+lm.overlap <- lm(aerob30secsum ~ period+time.seconds+time.seconds:period, data = df.overlapped)
+
+require(car)
+anova.lm.overlap<-car::Anova(lm.overlap, type = 3)
+p_diff <- anova.lm.overlap$`Pr(>F)`[4]
+end.steeper.than.stable <- lm.overlap$coefficients[4] > 0
+
+lmtestMLA <- case_when(end.steeper.than.stable ~ F,
+                       p_diff < significant_difference_slope ~ T,
+                       T ~ F)
+
+  out_data_baseline$lmtestMLA[out_data_baseline$from_file==filename] <- lmtestMLA
+  out_data_baseline$endsteep[out_data_baseline$from_file==filename]  <- end.steeper.than.stable
+  out_data_baseline$tooshort[out_data_baseline$from_file==filename]  <- F
+  out_data_baseline$aerobmaxinwarmup[out_data_baseline$from_file==filename]  <- F
+  
+} else{
+  out_data_baseline$tooshort[out_data_baseline$from_file==filename]  <- T
+    }
+} else {
+   out_data_baseline$aerobmaxinwarmup[out_data_baseline$from_file==filename]  <- T
+}
+}
+
+out_data_baseline<-out_data_baseline %>% mutate(
+  Quality_Score = 
+    case_when(
+              borg >= 17 ~ 1,
+              borg < 17 ~ 0,
+              T~NA_real_) + 
+    case_when (lmtestMLA ~ 1,
+               lmtestMLA == F ~ 0,
+              T~NA_real_) + 
+    case_when ( maxRQ >=1.1 ~ 1,
+                maxRQ <1.1 ~ 0,
+              T~NA_real_),
+  QualityMeasurement = Quality_Score >= 2
+)
+
+time2 <- Sys.time()
+
+time2-time1
+```
+
+## Screening
+
+```{r messages = F eval = F}
+
+directory = Screening.directory
+#directories = directories
+warmup.period = 300
+#filename = dir(directory)[20]
+shortest.analysed.test = warmup.period+120
+sd.to.search.over = 2
+end.period = 30
+lag_time_stable_to_end = 0
+id_start<-1
+id_stop<-6
+width_to_sum_in_sec <- 30
+significant_difference_slope = 0.05
+
+curr_timepoint <- word(directory, start = -1, sep = "/")
+
+out_data_screening <- data.frame( 
+                id = c(to_snake_case(stringr::str_sub(dir(directory), id_start, id_stop))),
+                timepoint = curr_timepoint,
+                from_file = dir(directory),
+                aerobiccapacity = NA_real_,
+                VO2max = NA_real_,
+                HRmax = NA_real_,
+                MaxOxygenPulse = NA_real_,
+                maxRQ = NA_real_
+                )
+
+
+time3 <- Sys.time()
+
+for (filename in dir(directory)) {
+
+curr_id <- to_snake_case(stringr::str_sub(filename, id_start, id_stop))
+p<-paste0(directory,"/",filename)
+df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("...")))
+
+if (is.null(dim(df))|is.na(colnames(df)[1])){next}
+
+colnames(df)[1] <- "time.mad.excel.format"
+  
+df<-df%>%
+   mutate(
+    #time.mad.dec = t,
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+   # t = lubridate::period_to_seconds(time.mmss)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  
+  
+wvector<-sapply(seq_along(df$time.seconds), FUN=
+                             function(i) {which(df$time.seconds[-(seq_len(i))] >=
+                                                 df$time.seconds[i]+width_to_sum_in_sec)[1]})
+wvector<-case_when(is.na(wvector) ~ 6,
+                   T ~ wvector)
+
+
+
+df<-df%>%mutate(
+  from_file = filename,
+  id = curr_id,
+  time.minuts = round(time.seconds/60,2),
+  timepoint = curr_timepoint, 
+  aerob30secsum = #TODO clear up that this period depends on the input
+    zoo::rollapply(`VO2/Kg`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  vo2.30.sec.sum =
+    zoo::rollapply(`VO2`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_)  )
+
+  dato=suppressWarnings(
+    read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1]
+    )
+  height = suppressWarnings(
+    read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1]
+    )
+  weight = suppressWarnings(
+    read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1]
+    )
+
+
+write_xlsx(x=df,
+           path = paste0("L:/LovbeskyttetMapper/LupEx/TMF/13 Analyser/From R/","VO2maxWrittenByR", curr_id,"_",curr_timepoint,".xlsx"))
+
+out_data_screening %>% mutate(
+  id = curr_id,
+  timepoint = curr_timepoint,
+  aerobsum = max(df$aerob30secsum, na.rm =T),
+  HRmax = max(df$HR, na.rm =T),
+  MaxOxygenPulse = max(df$`VO2/HR`, na.rm =T),
+  maxRQ = max(df$RQ, na.rm =T)
+)
+
+  out_data_screening$id[out_data_screening$from_file==filename] = curr_id
+  out_data_screening$timepoint[out_data_screening$from_file==filename]  = curr_timepoint
+  out_data_screening$aerobiccapacity[out_data_screening$from_file==filename]  = max(df$aerob30secsum, na.rm =T)
+  out_data_screening$VO2max[out_data_screening$from_file==filename]  = max(df$vo2.30.sec.sum, na.rm =T)
+  out_data_screening$HRmax[out_data_screening$from_file==filename]  = max(df$HR, na.rm =T)
+  out_data_screening$MaxOxygenPulse[out_data_screening$from_file==filename]  = max(df$`VO2/HR`, na.rm =T)
+  out_data_screening$maxRQ[out_data_screening$from_file==filename]  = max(df$RQ, na.rm =T)
+  out_data_screening$height[out_data_screening$from_file==filename]  = height
+  out_data_screening$weight[out_data_screening$from_file==filename]  = weight
+  out_data_screening$date[out_data_screening$from_file==filename]  = dato
+  
+df.warmup <- df %>% filter(time.seconds<=warmup.period)
+mean.VO2kg.warmup <- mean(df.warmup$`VO2/Kg`, na.rm = T)
+sd.VO2kg.warmup <- sd(df.warmup$`VO2/Kg`, na.rm = T)
+
+if (is.null(shortest.analysed.test)){
+shortest.analysed.test=warmup.period+120}
+
+if (df$time.seconds[match(max(df$aerob30secsum, na.rm =T), df$aerob30secsum)]>=shortest.analysed.test){
+
+if(max(df$time.seconds,na.rm=T)>=shortest.analysed.test ){
+
+  stable_start_time<-min(df$time.seconds[min(which(df$aerob30secsum>
+                             mean.VO2kg.warmup+
+                               sd.to.search.over*sd.VO2kg.warmup), na.rm =T)], 
+                       warmup.period, na.rm=T) 
+
+df.stablework<- df%>% filter(
+  time.seconds > stable_start_time & 
+    time.seconds <= time.seconds[match(max(df$aerob30secsum,na.rm=T),
+                       df$aerob30secsum)]-lag_time_stable_to_end-end.period)
+
+df.end<- df %>% filter(
+    time.seconds > time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-end.period &
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]+end.period)
+
+df.end.start.time <- min(df.end$time.seconds, na.rm =T)
+df.stable.start.time <- min(df.stablework$time.seconds, na.rm =T)
+
+df.overlapped <- rbind(
+  df.end %>% mutate( period = "end", 
+                     time.seconds = time.seconds-df.end.start.time+df.stable.start.time),
+  df.stablework %>% mutate (period = "stable")
+) %>% mutate(period = factor( period, levels = c("stable", "end")))
+
+lm.overlap <- lm(aerob30secsum ~ period+time.seconds:period, data = df.overlapped)
+
+require(car)
+anova.lm.overlap<-car::Anova(lm.overlap, type = 3)
+p_diff <- anova.lm.overlap$`Pr(>F)`[3]
+end.steeper.than.stable <- lm.overlap$coefficients[4] > lm.overlap$coefficients[3]
+
+lmtestMLA <- case_when(end.steeper.than.stable ~ F,
+                       p_diff < significant_difference_slope ~ T,
+                       T ~ F)
+
+  out_data_screening$lmtestMLA[out_data_screening$from_file==filename] <- lmtestMLA
+  out_data_screening$endsteep[out_data_screening$from_file==filename]  <- end.steeper.than.stable
+  out_data_screening$tooshort[out_data_screening$from_file==filename]  <- F
+  out_data_screening$aerobmaxinwarmup[out_data_screening$from_file==filename]  <- F
+  
+} else{
+  out_data_screening$tooshort[out_data_screening$from_file==filename]  <- T
+    }
+} else {
+   out_data_screening$aerobmaxinwarmup[out_data_screening$from_file==filename]  <- T
+}
+}
+
+time4 <- Sys.time()
+
+time4-time3
+```
+
+##Followup
+
+```{r eval =F}
+
+directory = Followup.directory
+#directories = directories
+warmup.period = 300
+#filename = dir(directory)[20]
+shortest.analysed.test = warmup.period+120
+sd.to.search.over = 2
+end.period = 30
+lag_time_stable_to_end = 0
+id_start<-1
+id_stop<-6
+width_to_sum_in_sec <- 30
+significant_difference_slope = 0.05
+
+curr_timepoint <- word(directory, start = -1, sep = "/")
+
+out_data_followup <- data.frame( 
+                id = c(to_snake_case(stringr::str_sub(dir(directory), id_start, id_stop))),
+                timepoint = curr_timepoint,
+                from_file = dir(directory),
+                aerobiccapacity = NA_real_,
+                VO2max = NA_real_,
+                HRmax = NA_real_,
+                MaxOxygenPulse = NA_real_,
+                maxRQ = NA_real_
+                )
+
+
+time5 <- Sys.time()
+
+for (filename in dir(directory)) {
+
+curr_id <- to_snake_case(stringr::str_sub(filename, id_start, id_stop))
+p<-paste0(directory,"/",filename)
+df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("...")))
+
+if (is.null(dim(df))|is.na(colnames(df)[1])){next}
+
+colnames(df)[1] <- "time.mad.excel.format"
+  
+df<-df%>%
+   mutate(
+    #time.mad.dec = t,
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+   # t = lubridate::period_to_seconds(time.mmss)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  
+  
+wvector<-sapply(seq_along(df$time.seconds), FUN=
+                             function(i) {which(df$time.seconds[-(seq_len(i))] >=
+                                                 df$time.seconds[i]+width_to_sum_in_sec)[1]})
+wvector<-case_when(is.na(wvector) ~ 6,
+                   T ~ wvector)
+
+
+
+df<-df%>%mutate(
+  from_file = filename,
+  id = curr_id,
+  time.minuts = round(time.seconds/60,2),
+  timepoint = curr_timepoint, 
+  aerob30secsum = #TODO clear up that this period depends on the input
+    zoo::rollapply(`VO2/Kg`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  vo2.30.sec.sum =
+    zoo::rollapply(`VO2`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_))
+
+  dato=suppressWarnings(
+    read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1]
+    )
+  height = suppressWarnings(
+    read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1]
+    )
+  weight = suppressWarnings(
+    read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1]
+    )
+
+write_xlsx(x=df,
+           path = paste0("L:/LovbeskyttetMapper/LupEx/TMF/13 Analyser/From R/","VO2maxWrittenByR", curr_id,"_",curr_timepoint,".xlsx"))
+
+out_data_followup %>% mutate(
+  id = curr_id,
+  timepoint = curr_timepoint,
+  aerobsum = max(df$aerob30secsum, na.rm =T),
+  HRmax = max(df$HR, na.rm =T),
+  MaxOxygenPulse = max(df$`VO2/HR`, na.rm =T),
+  maxRQ = max(df$RQ, na.rm =T)
+)
+
+  out_data_followup$id[out_data_followup$from_file==filename] = curr_id
+  out_data_followup$timepoint[out_data_followup$from_file==filename]  = curr_timepoint
+  out_data_followup$aerobiccapacity[out_data_followup$from_file==filename]  = max(df$aerob30secsum, na.rm =T)
+  out_data_followup$VO2max[out_data_followup$from_file==filename]  = max(df$vo2.30.sec.sum, na.rm =T)
+  out_data_followup$HRmax[out_data_followup$from_file==filename]  = max(df$HR, na.rm =T)
+  out_data_followup$MaxOxygenPulse[out_data_followup$from_file==filename]  = max(df$`VO2/HR`, na.rm =T)
+  out_data_followup$maxRQ[out_data_followup$from_file==filename]  = max(df$RQ, na.rm =T)
+  out_data_followup$height[out_data_followup$from_file==filename]  = height
+  out_data_followup$weight[out_data_followup$from_file==filename]  = weight
+  out_data_followup$date[out_data_followup$from_file==filename]  = dato
+  
+df.warmup <- df %>% filter(time.seconds<=warmup.period)
+mean.VO2kg.warmup <- mean(df.warmup$`VO2/Kg`, na.rm = T)
+sd.VO2kg.warmup <- sd(df.warmup$`VO2/Kg`, na.rm = T)
+
+if (is.null(shortest.analysed.test)){
+shortest.analysed.test=warmup.period+120}
+
+if (df$time.seconds[match(max(df$aerob30secsum, na.rm =T), df$aerob30secsum)]>=shortest.analysed.test){
+
+if(max(df$time.seconds,na.rm=T)>=shortest.analysed.test ){
+
+  stable_start_time<-min(df$time.seconds[min(which(df$aerob30secsum>
+                             mean.VO2kg.warmup+
+                               sd.to.search.over*sd.VO2kg.warmup), na.rm =T)], 
+                       warmup.period, na.rm=T) 
+
+df.stablework<- df%>% filter(
+  time.seconds > stable_start_time & 
+    time.seconds <= time.seconds[match(max(df$aerob30secsum,na.rm=T),
+                       df$aerob30secsum)]-lag_time_stable_to_end-end.period)
+
+df.end<- df %>% filter(
+    time.seconds > time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-end.period &
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]+end.period)
+
+df.end.start.time <- min(df.end$time.seconds, na.rm =T)
+df.stable.start.time <- min(df.stablework$time.seconds, na.rm =T)
+
+df.overlapped <- rbind(
+  df.end %>% mutate( period = "end", 
+                     time.seconds = time.seconds-df.end.start.time+df.stable.start.time),
+  df.stablework %>% mutate (period = "stable")
+) %>% mutate(period = factor( period, levels = c("stable", "end")))
+
+lm.overlap <- lm(aerob30secsum ~ period+time.seconds:period, data = df.overlapped)
+
+require(car)
+anova.lm.overlap<-car::Anova(lm.overlap, type = 3)
+p_diff <- anova.lm.overlap$`Pr(>F)`[3]
+end.steeper.than.stable <- lm.overlap$coefficients[4] > lm.overlap$coefficients[3]
+
+lmtestMLA <- case_when(end.steeper.than.stable ~ F,
+                       p_diff < significant_difference_slope ~ T,
+                       T ~ F)
+
+  out_data_followup$lmtestMLA[out_data_followup$from_file==filename] <- lmtestMLA
+  out_data_followup$endsteep[out_data_followup$from_file==filename]  <- end.steeper.than.stable
+  out_data_followup$tooshort[out_data_followup$from_file==filename]  <- F
+  out_data_followup$aerobmaxinwarmup[out_data_followup$from_file==filename]  <- F
+  
+} else{
+  out_data_followup$tooshort[out_data_followup$from_file==filename]  <- T
+    }
+} else {
+   out_data_followup$aerobmaxinwarmup[out_data_followup$from_file==filename]  <- T
+}
+}
+
+time6 <- Sys.time()
+
+time6-time5
+
+time6-time1
+```
+
+#Testing Area
+
+```{r eval =F}
+curr_id <- to_snake_case(stringr::str_sub("lup001"))
+directory = Followup.directory
+filename = dir(directory)[1]
+p<-paste0(directory,"/",filename)
+df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("...")))
+
+if (is.null(dim(df))|is.na(colnames(df)[1])){next}
+
+colnames(df)[1] <- "time.mad.excel.format"
+colnames(df)[colnames(df)=="VO2/kg"]<-
+
+#The metadata has the end of each test.
+test.time<-metadata%>%dplyr::filter( id==curr_id & timepoint==curr_timepoint)%>%pull(metadata_time_seconds)  
+  
+  
+df<-df%>%
+   mutate(
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  #filter(
+  #  time.seconds <=test.time
+  #)
+
+```
+
+##Even more deprecated below this line
+
+```{r eval = F}
+directories <- c(Followup.directory, Baseline.directory, Screening.directory)
+
+
+p<-paste0(Baseline.directory,"/",dir(Baseline.directory)[30])
+df<-read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains(
+   "..." 
+  )  )%>%dplyr::rename(
+    time.mad.excel.format = 1
+  )%>%
+   mutate(
+    #time.mad.dec = t,
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+   # t = lubridate::period_to_seconds(time.mmss)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+
+df<-df%>%mutate(
+  aerob30secsum = 
+    zoo::rollapply(`VO2/Kg`, width = 6, FUN = mean, align="left", fill =NA_real_),
+  dato=read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1],
+  height = read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1],
+  weight = read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1])
+
+
+df.warmup <- df %>% filter(time.seconds<300)
+mean.aerob30secsum.warmup <- mean(df.warmup$aerob30secsum, na.rm = T)
+sd.aerob30secsum.warmup <- sd(df.warmup$aerob30secsum, na.rm = T)
+
+df.stablework<- df%>% filter(
+  time.seconds > 300 & 
+    time.seconds >
+    df$time.seconds[min(which(df$aerob30secsum>mean.aerob30secsum.warmup+2*sd.aerob30secsum.warmup))] &
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-30)
+
+lm.stable<-lm( VO2 ~ time.seconds,  data=df.stablework)
+
+df.end<- df %>% filter(
+    time.seconds > time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-30 &
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]+30)
+
+lm.end<-lm( VO2 ~ time.seconds,  data=df.end)
+
+lmtestMLA<- abs(summary(lm.end)$coefficients[6]) < 2
+
+slope.stable <- summary(lm.stable)$coefficients[2]
+slope.end <- summary(lm.end)$coefficients[2]
+n.stable <- 
+  (max(df.stablework$time.seconds, na.rm =T)-
+     min(df.stablework$time.seconds, na.rm =T))/5
+n.end <- 
+  (max(df.stablework$time.seconds, na.rm =T)-
+     min(df.stablework$time.seconds, na.rm =T))/5
+sd.stable<-
+  summary(lm.stable)$coefficients[4]*sqrt(n.stable)
+sd.end<-
+  summary(lm.end)$coefficients[4]*sqrt(n.end)
+
+#BSDA::tsum.test(
+ # mean.x = slope.stable, s.x = sd.stable, n.x = n.stable,
+#  mean.y = slope.end, s.y = sd.end, n.y=n.end)
+
+#df.stablework %>%ggplot(aes(x=time.seconds, y = VO2)) + geom_point()
+#df.end %>%ggplot(aes(x=time.seconds, y = VO2)) + geom_point()
+
+#Z <- (summary(lm.stable)$coefficients[2] - 
+#           summary(lm.end)$coefficients[2]) / 
+#    sqrt(sd.stable^2 + 
+#         sd.end^2) 
+
+#lmtestST<-case_when(abs(Z) < 2.0 ~ "no plateau",
+#                    abs(Z) < 2.5 ~ "slight plateau",
+#                    abs(Z) < 3.0 ~ "plateau",
+#                    abs(Z) >= 3.0 ~ "clear plateau",
+#                    T~ NA_character_)
+
+
+
+
+directories = directories
+warmup.period = 300
+filename = dir(directories)
+shortest.analysed.test = warmup.period+120
+sd.to.search.over = 2
+end.period = 30
+lag_time_stable_to_end = 0
+id_start<-1
+id_stop<-6
+width_to_sum_in_sec <- 30
+significant_difference_slope = 0.05
+
+out_data<- data.frame(id = c(to_snake_case(stringr::str_sub(filename, id_start, id_stop))))
+
+for (directory in directories){
+  curr_timepoint <- word(directory, start = -1, sep = "/")
+  
+  assign(paste0("out_data_",  curr_timepoint), 
+         data.frame( id = 
+                       c(to_snake_case(stringr::str_sub(dir(directory), id_start, id_stop))),
+                     timepoint = curr_timepoint,
+                     filename = dir(directory)))
+  
+for (filename in eval(str2lang(paste0("out_data_",  curr_timepoint, "$filename")))) {
+  
+p<-paste0(directory,"/",filename)
+df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("..."))%>%dplyr::rename(
+    time.mad.excel.format = 1
+  )%>%
+   mutate(
+    #time.mad.dec = t,
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+   # t = lubridate::period_to_seconds(time.mmss)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  )
+  
+wvector<-sapply(seq_along(df$time.seconds), FUN=
+                             function(i) {which(df$time.seconds[-(seq_len(i))] >=
+                                                 df$time.seconds[i]+width_to_sum_in_sec)[1]})
+wvector<-case_when(is.na(wvector) ~ 6,
+                   T ~ wvector)
+
+df<-df%>%mutate(
+  from_file = filename,
+  id = curr_id,
+  time.minuts = round(time.seconds/60,2),
+  timepoint = curr_timepoint, 
+  aerob30secsum = #TODO clear up that this period depends on the input
+    zoo::rollapply(`VO2/Kg`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  dato=suppressWarnings(
+    read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1]
+    ),
+  height = suppressWarnings(
+    read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1]
+    ),
+  weight = suppressWarnings(
+    read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1]
+    )
+  )
+
+out_list[[curr_id]]<-curr_id
+out_list[[curr_id]][[curr_timepoint]] <- c(curr_timepoint, data.frame())
+out_list[[curr_id]][[curr_timepoint]][["data.frame"]] <- df
+out_list[[curr_id]][[curr_timepoint]][["aerobsum"]] <- max(df$aerob30secsum, na.rm =T)
+out_list[[curr_id]][[curr_timepoint]][["HRmax"]] <- max(df$HR, na.rm =T)
+out_list[[curr_id]][[curr_timepoint]][["MaxOxygenPulse"]] <- max(df$`VO2/HR`, na.rm =T)
+
+
+if (is.null(shortest.analysed.test)){
+shortest.analysed.test=warmup.period+120}
+
+if(max(df$time.seconds,na.rm=T)>=shortest.analysed.period){
+df.warmup <- df %>% filter(time.seconds<=warmup.period)
+mean.VO2kg.warmup <- mean(df.warmup$`VO2/Kg`, na.rm = T)
+sd.VO2kg.warmup <- sd(df.warmup$`VO2/Kg`, na.rm = T)
+
+stable_start_time<-min(df$time.seconds[min(which(df$aerob30secsum>
+                             mean.VO2kg.warmup+sd.to.search.over*sd.VO2kg.warmup))], 
+                       warmup.period, na.rm=T) 
+
+
+df.stablework<- df%>% filter(
+  time.seconds > stable_start_time & 
+    time.seconds <= 
+    time.seconds[match(max(df$aerob30secsum,na.rm=T),
+                       df$aerob30secsum)]-lag_time_stable_to_end-end.period)
+
+df.end<- df %>% filter(
+    time.seconds > time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-end.period &
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]+end.period)
+
+df.end.start.time <- min(df.end$time.seconds, na.rm =T)
+df.stable.start.time <- min(df.stablework$time.seconds, na.rm =T)
+
+df.overlapped <- rbind(
+  df.end %>% mutate( period = "end", 
+                     time.seconds = time.seconds-df.end.start.time+df.stable.start.time),
+  df.stablework %>% mutate (period = "stable")
+) %>% mutate(period = factor( period, levels = c("stable", "end")))
+
+lm.overlap <- lm(aerob30secsum ~ period+time.seconds:period, data = df.overlapped)
+
+require(car)
+anova.lm.overlap<-car::Anova(lm.overlap, type = 3)
+p_diff <- anova.lm.overlap$`Pr(>F)`[3]
+end.steeper.than.stable <- lm.overlap$coefficients[4] > lm.overlap$coefficients[3]
+
+lmtestMLA <- case_when(end.steeper.than.stable ~ F,
+                       p_diff < significant_difference_slope ~ T,
+                       T ~ F)
+
+out_list[[id==curr_id]][[curr_timepoint]][["lmtestMLA"]] <- lmtestMLA
+out_list[[curr_id]][[curr_timepoint]][["lm"]] <- lm.overlap 
+out_list[[curr_id]][[curr_timepoint]][["endsteep"]] <- end.steeper.than.stable 
+out_list[[curr_id]][[curr_timepoint]][["tooshort"]] <- F
+} else {
+out_list[[curr_id]][[curr_timepoint]][["tooshort"]] <- T
+out_list[[curr_id]][[curr_timepoint]][["lmtestMLA"]] <- NA
+out_list[[curr_id]][[curr_timepoint]][["lm"]] <- NA
+}}}
+
+```
+
+```{r eval =F}
+
+id_start<-1
+id_stop<-6
+
+vo2max_data_from_folder <- function(directories, id_start=1, id_stop=6){
+  
+  
+vo2maxsumdf <- data.frame(
+  filename = c(dir(directories)),
+  id = NA_character_,
+  HRmax = NA_real_,
+  VO2Max = NA_real_,
+  AerobCapacity = NA_real_,
+  lm_test_plateau_ST_style = NA,
+  lm_test_plateau_MLA_style = NA
+  
+)
+
+model.list<-list(dir(directories))
+
+for (directory in directories){
+for (filename in dir(directory)) {
+  p<-paste0(directory,"/",filename)
+  
+  df<-read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains(
+   "..." 
+  )  )%>%
+  mutate(
+    t = 5*as.numeric(t)/as.numeric(t[1])
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  
+df<-df%>%mutate(
+  from_file = paste0(directory,"/",filename),
+  id = to_snake_case(stringr::str_sub(filename, start = id_start, end=id_stop )),
+  t_minutes = round(t/60,2),
+  direct = directory,
+  timepoint = case_when(grepl("ollow", directory) ~ "followup",
+                        grepl("aselin", directory) ~ "baseline",
+                        grepl("reening", directory) ~ "screening",
+                        T ~ NA_character_), #TODO rewrite into a case_when dependant on directory
+  aerob30secsum = 
+    zoo::rollapply(`VO2/Kg`, 
+                   width = 6, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  dato=read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1],
+  height = read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1],
+  weight = read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1])
+
+assign(paste0(filename,".dataframe"),df)  
+    
+}}
+
+}
+```
+
+```{r eval = F}
+v <- 1:150*100 + sample(5:500, size = 150)
+v[2]<-145
+test2 <- test+30
+
+test[min(which(test >= test2))]
+
+min(which(test > 100))
+
+which(test >= test + 100)
+
+which(test >= test2)
+
+v[(sapply(seq_along(v), function(i) which(v[-(seq_len(i))] >= v[i])[1]))]
+
+wvector<-case_when(is.na(sapply(seq_along(v), function(i) which(v[-(seq_len(i))] >= v[i])[1])) ~ 1,
+                   T~ sapply(seq_along(v), function(i) which(v[-(seq_len(i))] >= v[i])[1]))
+
+rollapply(v, width = wvector, FUN=mean, na.rm=T, align = "left")
+
+
+```
+
+```{r eval =F}
+get_and_test_vo2max<-
+  function(
+directories, 
+warmup.period = 300,
+shortest.analysed.test = warmup.period+120,
+sd.to.search.over = 2,
+end.period = 30,
+lag_time_stable_to_end = 0,
+id_start=1,
+id_stop=6,
+width_to_sum_in_sec = 30,
+significant_difference_slope = 0.05){
+
+
+out_data<- data.frame(filename = dir(directories),
+                      id=to_snake_case(stringr::str_sub(filename, id_start, id_stop)))
+
+for (directory in directories){
+  curr_timepoint = case_when(grepl("ollow", directory) ~ "followup",
+                        grepl("aselin", directory) ~ "baseline",
+                        grepl("reening", directory) ~ "screening",
+                        T ~ NA_character_)
+for (filename in out_data$filename) {
+  
+curr_id<-to_snake_case(stringr::str_sub(filename, id_start, id_stop))
+
+
+p<-paste0(directory,"/",filename)
+
+  df<-suppressWarnings(
+  read_excel( path=p,
+                range = c("J1:BZ300"), col_names = T , col_types = "numeric")%>%
+  filter(!row_number() %in% c(1, 2))%>%
+  as.data.frame()%>%dplyr::select(-contains("..."))%>%dplyr::rename(
+    time.mad.excel.format = 1
+  )%>%
+   mutate(
+    #time.mad.dec = t,
+    time.seconds = round(time.mad.excel.format*86400 ,0)
+   # t = lubridate::period_to_seconds(time.mmss)
+  )%>%filter(rowSums(is.na(.)) != ncol(.))
+  )
+  
+wvector<-sapply(seq_along(df$time.seconds), FUN=
+                             function(i) {which(df$time.seconds[-(seq_len(i))] >=
+                                                 df$time.seconds[i]+width_to_sum_in_sec)[1]})
+wvector<-case_when(is.na(wvector) ~ 6,
+                   T ~ wvector)
+
+df<-df%>%mutate(
+  from_file = filename,
+  id = curr_id,
+  time.minuts = round(time.seconds/60,2),
+  timepoint = curr_timepoint, 
+  aerob30secsum = #TODO clear up that this period depends on the input
+    zoo::rollapply(`VO2/Kg`, 
+                   width = wvector, 
+                   FUN = mean, 
+                   align="left", 
+                   fill =NA_real_),
+  dato=suppressWarnings(
+    read_excel(path=p,
+                range = "E1:E1", col_names = F, col_types="text")[1,1]
+    ),
+  height = suppressWarnings(
+    read_excel( path=p,
+                range = "B6:B6", col_types="numeric",col_names = F)[1,1]
+    ),
+  weight = suppressWarnings(
+    read_excel( path=p,
+                range = "B7:B7", col_types="numeric",col_names = F)[1,1]
+    )
+  )
+
+out_list[[curr_id]]<-curr_id
+out_list[[curr_id]][[curr_timepoint]] <- c(curr_timepoint, data.frame())
+out_list[[curr_id]][[curr_timepoint]][["data.frame"]] <- df
+out_list[[curr_id]][[curr_timepoint]][["aerobsum"]] <- max(df$aerob30secsum, na.rm =T)
+out_list[[curr_id]][[curr_timepoint]][["HRmax"]] <- max(df$HR, na.rm =T)
+out_list[[curr_id]][[curr_timepoint]][["MaxOxygenPulse"]] <- max(df$`VO2/HR`, na.rm =T)
+
+
+if (is.null(shortest.analysed.test)){
+shortest.analysed.test=warmup.period+120}
+
+if(max(df$time.seconds,na.rm=T)>=shortest.analysed.period){
+df.warmup <- df %>% filter(time.seconds<=warmup.period)
+mean.VO2kg.warmup <- mean(df.warmup$`VO2/Kg`, na.rm = T)
+sd.VO2kg.warmup <- sd(df.warmup$`VO2/Kg`, na.rm = T)
+
+stable_start_time<-min(df$time.seconds[min(which(df$aerob30secsum>
+                             mean.VO2kg.warmup+sd.to.search.over*sd.VO2kg.warmup))], 
+                       warmup.period, na.rm=T) 
+
+
+df.stablework<- df%>% filter(
+  time.seconds > stable_start_time & 
+    time.seconds <= 
+    time.seconds[match(max(df$aerob30secsum,na.rm=T),
+                       df$aerob30secsum)]-lag_time_stable_to_end-end.period)
+
+df.end<- df %>% filter(
+    time.seconds > time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]-end.period &
+    time.seconds < time.seconds[match(max(df$aerob30secsum,na.rm=T),df$aerob30secsum)]+end.period)
+
+df.end.start.time <- min(df.end$time.seconds, na.rm =T)
+df.stable.start.time <- min(df.stablework$time.seconds, na.rm =T)
+
+df.overlapped <- rbind(
+  df.end %>% mutate( period = "end", 
+                     time.seconds = time.seconds-df.end.start.time+df.stable.start.time),
+  df.stablework %>% mutate (period = "stable")
+) %>% mutate(period = factor( period, levels = c("stable", "end")))
+
+lm.overlap <- lm(aerob30secsum ~ period+time.seconds:period, data = df.overlapped)
+
+require(car)
+anova.lm.overlap<-car::Anova(lm.overlap, type = 3)
+p_diff <- anova.lm.overlap$`Pr(>F)`[3]
+end.steeper.than.stable <- lm.overlap$coefficients[4] > lm.overlap$coefficients[3]
+
+lmtestMLA <- case_when(end.steeper.than.stable ~ F,
+                       p_diff < significant_difference_slope ~ T,
+                       T ~ F)
+
+out_list[[id==curr_id]][[curr_timepoint]][["lmtestMLA"]] <- lmtestMLA
+out_list[[curr_id]][[curr_timepoint]][["lm"]] <- lm.overlap 
+out_list[[curr_id]][[curr_timepoint]][["endsteep"]] <- end.steeper.than.stable 
+out_list[[curr_id]][[curr_timepoint]][["tooshort"]] <- F
+} else {
+out_list[[curr_id]][[curr_timepoint]][["tooshort"]] <- T
+out_list[[curr_id]][[curr_timepoint]][["lmtestMLA"]] <- NA
+out_list[[curr_id]][[curr_timepoint]][["lm"]] <- NA
+}}}}
+```
+
+#Running the function

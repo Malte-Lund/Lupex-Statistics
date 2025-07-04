@@ -1,0 +1,497 @@
+---
+title: "MostImportantGenes"
+format: html
+editor: visual
+---
+
+## Loading packages - Setting options
+
+```{r}
+#library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(tidyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+#renv::install("table1")
+library(table1)
+#renv::install("flextable")
+#renv::install("officer")
+library(flextable)
+library(plotly)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+#renv::install("DescTools")
+library(DescTools)
+
+library(officer)
+library(LMMstar)
+library(multcomp)
+library(butils)
+
+#install.packages("corrplot")
+library(corrplot)
+
+library(ggplot2)
+library("pheatmap")
+
+library("plotly")
+
+#set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
+```
+
+## Choose mITT, PP or ITT (by leaving both F)
+
+```{r}
+mITT = T
+PP = F #I haven't made the PP analysis, and frankly I don't think I should, would the results be interpreted differently??
+
+#IF you have full access to the data set this to true, if you do not have full access and this is not set to false, the code will not work
+fullaccess = T
+
+```
+
+## Importing the data
+
+```{r}
+nanostring_biox<-
+  read_excel(path=here("output","nanostring_ID_as_rows.xlsx"))
+
+vo2max.data<-
+  read_excel(path = here("Data","vo2max.xlsx"))
+
+questionnaires.data<-
+  read_excel(path = here("Output","Questionnaires_combined.xlsx"))
+
+cytokine_score_sets<-
+  readRDS(file = here("Input","Cytokine_score_sets.rds"))
+
+
+Z_scores_nano<-read_excel(path=here("output","Z_scores_nanostring_ID_as_rows.xlsx"))
+```
+
+##Cluster analysis of IFN reduced lists:
+
+```{r}
+colnames(Z_scores_nano)<-
+  colnames(Z_scores_nano)|>
+  to_snake_case()
+
+data.cluster_IFN_all_netto<-
+  Z_scores_nano |>
+  dplyr::filter(timepoint == "Baseline")|>
+  dplyr::select(cytokine_score_sets$all_IFN_Netto)|>
+  scale(scale = T, center = T)
+
+clusters<-
+  hclust(
+  dist(data.cluster_IFN_all_netto, method = "euclidean"))
+
+plot(clusters)
+
+correlation.matrix.IFN.genes<-
+  cor(data.cluster_IFN_all_netto, method = "pearson")
+
+euclid.square.dist.cor.matr.square<-
+  dist(correlation.matrix.IFN.genes, method = "euclidean")^2
+
+correlation.cluster.IFN.Genes<-
+  hclust(as.dist(1-correlation.matrix.IFN.genes), method = "average")
+
+correlation.cluster.IFN.Genes|>plot()
+
+
+correlation.plot.IFN.Genes<-
+  corrplot(cor(data.cluster_IFN_all_netto))
+
+correlation.plot.IFN.Genes
+
+heatmap(cor(data.cluster_IFN_all_netto, method = "pearson"), scale = "row")
+
+##HeatMap
+dist.cor.cluster<-as.dist(1-correlation.matrix.IFN.genes)
+
+plot_ly(x=colnames(data.cluster_IFN_all_netto),
+        y=rownames(data.cluster_IFN_all_netto),
+        z = data.cluster_IFN_all_netto,
+        type = "heatmap")
+
+#install.packages("pheatmap")
+
+pretty_heat_IFN<-
+  pheatmap(mat=correlation.matrix.IFN.genes, 
+           cutree_rows = 14, cutree_cols=14,
+           scale = "none",
+           clustering_method = "average",
+           cluster_rows = T,
+           cluster_cols = T,
+           clustering_distance_rows = "correlation",
+           clustering_distance_cols = "correlation",
+           display_numbers=F,
+           number_format="%.1f",
+           fontsize_number=5)
+
+pretty_heat_IFN_kmeans4<-
+  pheatmap(mat=correlation.matrix.IFN.genes, 
+           kmeans_k = 6,
+           #cutree_rows = 14, cutree_cols=14,
+           scale = "none",
+           clustering_method = "average",
+           cluster_rows = T,
+           cluster_cols = T,
+           clustering_distance_rows = "correlation",
+           clustering_distance_cols = "correlation",
+           display_numbers=F,
+           number_format="%.1f",
+           fontsize_number=5)
+
+#pretty_heat_IFN_single<-
+#  pheatmap(mat=correlation.matrix.IFN.genes, 
+#           cutree_rows = 12, cutree_cols=12,
+#           scale = "none",
+#           clustering_method = "single",
+#           cluster_rows = T,
+#           cluster_cols = T,
+#           clustering_distance_rows = "correlation",
+#           clustering_distance_cols = "correlation")
+
+ggsave( filename = here("Output", "graphics","Pretty_Heat_IFN_Netto.JPG"), 
+        plot = pretty_heat_IFN,
+        width = 36,
+        height = 36,
+        units = "cm")
+
+data.cluster<-
+  Z_scores_nano |>
+  dplyr::filter(timepoint == "Baseline")|>
+  dplyr::select(where(is.numeric))|>
+  dplyr::select(-c( "box_number", "sample_number"#,"mRNA.content.normalization.flag"
+                    ))
+correlation.matrix<-cor(data.cluster, method = "pearson")
+euclid.dist.full.genes<-dist(correlation.matrix, method = "euclidean")
+
+#pretty_heat<-pheatmap(correlation.matrix, cutree_rows = 12, cutree_cols=12, 
+ #          clustering_method = "average")
+
+
+```
+
+## Cluster analysis of all genes
+
+```{r}
+time0<-Sys.time()
+All_gene_Z_scores<-
+  Z_scores_nano|>
+  dplyr::filter(timepoint=="Baseline")|>
+  dplyr::select(12:823)
+
+
+
+correlation.matrix.ALL.genes<-
+  cor(All_gene_Z_scores, method = "pearson")
+
+euclid.dist.square.correlation.matrix.ALL.genes<-
+  dist(correlation.matrix.ALL.genes)^2
+
+hclust.cor.all.genes<-
+  hclust(euclid.dist.square.correlation.matrix.ALL.genes, method="average")
+
+plot(hclust.cor.all.genes)
+
+#pretty_heat_ALL<-
+ # pheatmap(mat=correlation.matrix.ALL.genes, 
+  #         cutree_rows = 20, cutree_cols=20,
+   #        scale = "none",
+    #       clustering_method = "average",
+     #      cluster_rows = T,
+      #     cluster_cols = T,
+       #    clustering_distance_rows = "correlation",
+        #   clustering_distance_cols = "correlation",
+         #  display_numbers=F,
+          # number_format="%.1f",
+           #fontsize_number=5)
+
+time1<-Sys.time()
+```
+
+## Check most differently expressed genes
+
+```{r}
+nanostring_mergable <- 
+  nanostring_biox|>
+  dplyr::select(-c("BX_ID", "BXP ID" ,
+                   "Box number",
+                   "Sample number",
+                   "Customer Sample ID",
+                   "Sample type",
+                   "Sample concentration (ng/µl)",
+                   "Additional information",
+                   "Sample check at BioXpedia (date/Init)",
+                   "Samples returned /destroyed from BioXpedia (date/Init)",
+                   "Maltes kommentar:",
+                   "mRNA.content.normalization.flag"))|>
+  dplyr::filter(
+    timepoint == "Baseline" | timepoint == "HealthyControl"
+  )|>mutate(
+    group = factor(case_when(timepoint == "Baseline" ~ "Lupus",
+                             T~ timepoint), 
+                   levels = c("HealthyControl", "Lupus"))
+  )
+
+colnames(nanostring_mergable) <- 
+  to_snake_case(colnames(nanostring_mergable))
+
+genes<-colnames(nanostring_mergable)[1:826]
+log2_diff <- rep(NA_real_, 826)
+log2_SE <- rep(NA_real_, 826)
+p_value <- rep(NA_real_, 826)
+differentialExpressedGenes <- data.frame(
+  genes , log2_diff ,log2_SE, p_value
+)
+
+linear.model<-lm(formula = reformulate( "group" ,response = gene),
+             data = nanostring_mergable)
+
+summary(linear.model)
+for ( gene in genes){ # Do with Gene expression from 
+
+    linear.model<-lm(formula = reformulate( "group" ,response = gene),
+             data = nanostring_mergable)
+
+    differentialExpressedGenes$p_value[gene == differentialExpressedGenes$genes] <- 
+      summary(linear.model)$coefficients[8]
+    differentialExpressedGenes$log2_SE[gene == differentialExpressedGenes$genes] <- 
+      summary(linear.model)$coefficients[4]
+    differentialExpressedGenes$log2_diff[gene == differentialExpressedGenes$genes] <- 
+      summary(linear.model)$coefficients[2]
+}
+cut_off <- 0.05
+
+differentialExpressedGenes <- 
+  differentialExpressedGenes|>
+  mutate(p_adjust = p.adjust(p_value, method = "fdr"),
+         log_10_p = log(p_value,10),
+         log_10_p_adjust= log(p_adjust,10),
+         significance = case_when(p_value < cut_off ~ T,
+                                  T ~ F),
+         significance_adjust = case_when(p_adjust < cut_off ~ T,
+                                  T ~ F))
+
+log2_volcano_plot<- differentialExpressedGenes%>%
+  ggplot(aes(
+  x=log2_diff, 
+  y=-log_10_p,
+  color = significance,
+  label = genes))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=-log(cut_off,10), linetype="dashed", color = "red")+
+  theme(legend.position="none")
+
+log2_volcano_plot
+ggplotly(log2_volcano_plot)
+
+log2_volcano_plot_FDRCORRECTED<- 
+  differentialExpressedGenes%>%
+  ggplot(aes(
+  x=log2_diff, 
+  y=-log_10_p_adjust,
+  color = significance_adjust,
+  label = genes))+
+  geom_point()+
+  scale_color_manual(values = c("red","black"))+
+  geom_hline(yintercept=-log(cut_off,10), linetype="dashed", color = "red")+
+  theme(legend.position="none")
+
+log2_volcano_plot_FDRCORRECTED
+ggplotly(log2_volcano_plot_FDRCORRECTED)
+```
+
+## Loop that finds effect of each gene in a Linear Mixed Model. With GLHT of the effect.
+
+This is a fishing expedition, but we'll call it hypothesis generating so it's all going to be fine.
+
+So Let's go fishing I guess
+
+### Combined data set with all primary, secondary and transcriptomics. Transcriptomics at baseline at both BL and FU.
+
+```{r}
+data_vo2max_QC<-read_excel(
+  path = here("Output","VO2maxQC","Data.VO2MAXQC.xlsx")
+)
+
+data_vo2max_QC<-
+  data_vo2max_QC|>
+  dplyr::select(id, timepoint, aerobiccapacity, aerobiccapacity_noted, QualityMeasurementCS, easytrialQualityTest, QualityMeasurementMLA, operator)
+
+vo2_with_quality_controls<-vo2max.data|>left_join(data_vo2max_QC)|>
+  mutate(timepoint = factor(timepoint, levels = c("screening", "baseline", "followup")))
+
+vo2max.combined.data<-
+  vo2_with_quality_controls|>
+  dplyr::select(id, timepoint, treatment, treat, sex,
+                aerobiccapacity, vo_2_max, kondital, easytrialQualityTest)
+
+questionnaires.combined.data<-
+  questionnaires.data|>
+  dplyr::select(id, timepoint, treatment, treat, 
+                fatigue.mean, physical.component.score, mental.component.score)|>
+  rename( SF36.Physical = physical.component.score,
+          SF36.Mental = mental.component.score)
+
+SLEDAI.combined.data<-
+  read_excel(path = here("Data",paste0("SLEDAI.data.xlsx")))|>
+  dplyr::select(id, treatment, timepoint, SLEDAI_score, vas_sledai_physician)
+
+nanostring.combined.data<-
+  nanostring_mergable|>
+  mutate(id = to_snake_case(id))|>
+  dplyr::filter(timepoint == "Baseline")|>
+  dplyr::select(-c(timepoint, group))
+
+combined.data<-
+  vo2max.combined.data|>
+  left_join(questionnaires.combined.data)|>
+  left_join(SLEDAI.combined.data)|>
+  left_join(nanostring.combined.data)
+
+
+```
+
+### Loop over genes, find effect, put into table.
+
+```{r warning=FALSE message=F eval = F}
+differentialExpressedGenes<-
+  differentialExpressedGenes|>
+  mutate(
+    effect_VO2max = NA_real_,
+    p_value_VO2max = NA_real_,
+    effect_fatigue = NA_real_,
+    p_value_fatigue = NA_real_,
+    
+  )
+
+cont_vec_vo2 <-
+  rbind(
+    c(   #Difference of M_1_2 interaction
+      0, #(Intercept)
+      0, #timepointfollowup
+      0, #timepointscreening	
+      0, #sexM	
+      0, #gene	
+      0, #timepointfollowup:treatexercise
+     -1, #timepointfollowup:treatcontrol:gene
+      0, #timepointscreening:treatcontrol:gene	
+      1  #timepointfollowup:treatexercise:gene
+    ))
+
+rownames(cont_vec_vo2) <- c("Difference gene effect exercise minus control")
+
+ time1 <- Sys.time()
+for (gene in differentialExpressedGenes$genes){
+  lmm<-lmm(formula = 
+            reformulate(c("timepoint","treat","sex",gene,"treat:timepoint", paste0(gene,":timepoint+","treat:timepoint:",gene)) ,
+                        response = "aerobiccapacity"),
+           repetition = ~timepoint|id,
+           structure = "UN",
+              data = combined.data)
+  tb <- 
+  lmm|>
+  glht(linfct=cont_vec_vo2)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  digits.p.value = 7, 
+  method.multcomp="none")
+
+differentialExpressedGenes$p_value_VO2max[gene == differentialExpressedGenes$genes] <- 
+  as.numeric(tb$p.value[1])
+differentialExpressedGenes$effect_VO2max[gene == differentialExpressedGenes$genes] <-
+  as.numeric(tb$Estimate[1])
+
+}
+  time2 <- Sys.time()
+  time2-time1
+ 
+# gene <- "jak_3"
+
+# lmm<-lmm(formula = 
+#            reformulate(c("timepoint","treat","sex",gene,"treat:timepoint", paste0("treat:timepoint:",gene)) ,
+#                        response = "fatigue.mean"),
+#           repetition = ~timepoint|id,
+#           structure = "UN",
+#              data = combined.data)
+# plot(lmm, type = "scatterplot")
+#summary(lmm)
+
+cont_vec <-
+  rbind(
+    c(   #Difference of M_1_2 interaction
+      0, #(Intercept)
+      0, #timepointfollowup
+      0, #sexM
+      0, #gene	
+      0, #timepointfollowup:treatexercise
+     -1, #timepointfollowup:treatcontrol:gene
+      1  #timepointfollowup:treatexercise:gene
+    ))
+
+rownames(cont_vec) <- c("Difference gene effect exercise minus control")
+
+time3 <- Sys.time()
+ 
+ for (gene in genes){
+  lmm<-lmm(formula = 
+            reformulate(c("timepoint","treat","sex",gene,"treat:timepoint", paste0("treat:timepoint:",gene)) ,
+                        response = "fatigue.mean"),
+           repetition = ~timepoint|id,
+           structure = "UN",
+              data = combined.data)
+tb <- 
+  lmm|>
+  glht(linfct=cont_vec)|>
+  butils::multcomp2table(
+  method.glht = "glht", 
+  conf.level = 0.95, 
+  digits.p.value = 7,
+  method.multcomp="none")
+
+differentialExpressedGenes$p_value_fatigue[gene == differentialExpressedGenes$genes] <- 
+  as.numeric(tb$p.value[1])
+differentialExpressedGenes$effect_fatigue[gene == differentialExpressedGenes$genes] <- 
+  as.numeric(tb$Estimate[1])
+
+ }
+time4<-Sys.time()
+time4-time3
+ 
+ differentialExpressedGenes<-
+   differentialExpressedGenes|>
+   mutate(p_adjust_VO2max =p.adjust(p_value_VO2max, method = "fdr"),
+          p_adjust_fatigue =p.adjust(p_value_fatigue, method = "fdr"))|>
+   arrange(genes)
+ 
+ differentialExpressedGenes|>
+   saveRDS(
+   file = 
+     here( "Output","DifferentialExpression","Genes effect on fatigue and vo2max as well as expression differences between HC and SLE.rds")
+ )
+ 
+ differentialExpressedGenes|>
+   write_xlsx(
+   path = 
+     here( "Output","DifferentialExpression","Genes effect on fatigue and vo2max as well as expression differences between HC and SLE.xlsx")
+ )
+ 
+```
+
+### Loop for secondary outcomes??
+
+No

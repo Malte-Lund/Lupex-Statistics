@@ -1,0 +1,3501 @@
+---
+title: "Acute Bout Pulse Data Wrangling"
+format: html
+editor: visual
+---
+
+## Options and Libraries
+
+```{r}
+
+set.seed(42069)
+options(scipen=15)
+
+library(renv)
+library(beepr)
+library("readxl")
+library(dplyr)
+library(tidyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+library(flextable)
+#install.packages("remotes")
+library(remotes)
+#install.packages("riskRegression")
+library(riskRegression)
+#install.packages("BuyseTest")
+library(BuyseTest)
+#remotes::install_github("bozenne/butils")
+library(butils)
+library(DescTools)
+library(LMMstar) #Has the summarize on formula function that really makes the code easier to write, it's a bit slow though, so I should probably update it.
+library(plotly)
+library(multcomp)
+library(officer)
+library(lubridate)
+library(stats) #We are doing splines below
+library(mgcv) #We initially wanted to do GAMs but have deprecated the funcitons #UPDATE: WE WANT TO DO THIS; ITS REALLY COOL!
+
+#install.packages("marginaleffects")
+#install.packages("data.table")
+library(data.table)
+library(marginaleffects)
+
+#set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
+here::i_am("Code/Paper2/Acute_Bout_Pulse_data_wrangling.qmd")
+
+
+```
+
+## Read Raw Data
+
+```{r}
+directory_baseline <-
+  here("Data", "Acute Bout", "Pre")
+
+
+not_all_na <- function(x) any(!is.na(x))
+not_any_na <- function(x) all(!is.na(x))    
+##Read baseline as for loop:
+for(filename in dir(directory_baseline)){
+  if (grepl("a.CSV", filename)){
+    base_data <- read.csv(
+          file = paste0(
+            directory_baseline,"/", filename
+        ),
+        nrows = 1
+      )
+    df<-read.csv(
+          file = paste0(
+            directory_baseline,"/", filename
+        ),
+        skip = 2
+      )%>%
+      dplyr::select(
+        where(
+          not_all_na
+        )
+      )
+    colnames(df)<-
+      colnames(df)%>%
+      to_snake_case()
+    
+    df<-
+      df%>%
+      mutate(
+        timepoint = "baseline",
+        id = to_snake_case(substr(filename, 1, 6)),
+        date = base_data$Date[1],
+        #hr_max = base_data$HR.max[1], HR_Max doesn't work like this, it's the same for all patients in this dataset (?)
+        #hr_percent_of_max = hr_bpm/hr_max * 100,
+        lubri_time = hms(time),
+        start_time = hms(base_data$Start.time[1]),
+        clock_time = lubri_time + start_time,
+        total_calories = base_data$Calories[1]
+      )
+    
+    assign(
+      x=paste0("df_",filename),
+      value =df
+    )
+    if(
+      which(dir(directory_baseline)==filename)==
+            grep(pattern="a.CSV",x=dir(directory_baseline))[1]
+      ){
+        out_data_baseline <- df
+    } else {
+        out_data_baseline <- 
+          out_data_baseline%>%
+          bind_rows(df)
+      }
+    
+  }
+}
+
+directory_followup <-
+  here("Data", "Acute Bout", "Post")
+
+
+##Read followup as for loop:
+for(filename in dir(directory_followup)){
+  if (grepl("b.CSV", filename)){
+    base_data <- read.csv(
+          file = paste0(
+            directory_followup,"/", filename
+        ),
+        nrows = 1
+      )
+    df<-read.csv(
+          file = paste0(
+            directory_followup,"/", filename
+        ),
+        skip = 2
+      )%>%
+      dplyr::select(
+        where(
+          not_all_na
+        )
+      )
+    colnames(df)<-
+      colnames(df)%>%
+      to_snake_case()
+    
+    df<-
+      df%>%
+      mutate(
+        timepoint = "followup",
+        id = to_snake_case(substr(filename, 1, 6)),
+        date = base_data$Date[1],
+        #hr_max = base_data$HR.max[1], #HR max doesn't work from this, we should get it from the aerobic capacity data instead
+        #hr_percent_of_max = hr_bpm/hr_max * 100,
+        lubri_time = hms(time),
+        start_time = hms(base_data$Start.time[1]),
+        clock_time = lubri_time + start_time,
+        total_calories = base_data$Calories[1]
+      )
+    
+    assign(
+      x=paste0("df_",filename),
+      value =df
+    )
+    if(
+      which(dir(directory_followup)==filename)==
+            grep(pattern="b.CSV",x=dir(directory_followup))[1]
+      ){
+        out_data_followup<- df
+    } else {
+        out_data_followup <- 
+          out_data_followup%>%
+          bind_rows(df)
+      }
+    
+  }
+}
+df_merged <-
+  bind_rows(
+    out_data_baseline,
+    out_data_followup)%>%
+  #remove data that has issues noted in easytrial. 
+  dplyr::filter(
+    id != "lup_052", # Different issues on baseline and followup, but issues on both
+  )%>%
+  dplyr::filter(
+    id != "lup_004" # Only has a baseline and the pulse monitor was not working properly
+  )%>%
+  dplyr::filter(
+    id != "lup_006" # was excluded from the study
+  )%>%
+  dplyr::filter(
+    id != "lup_021"
+  )
+
+group_cytokine <- 
+  read_excel(path = here("Data","grouping_cytokine.xlsx"))
+
+sex.hrmax.data <- 
+  read_excel(path =  here("Data","vo2max.xlsx"))%>%
+  dplyr::filter(timepoint != "screening")%>%
+  dplyr::select(id, timepoint,sex, hrmax, watt_max)
+
+#For some reason lup_006 also enters, while she was excluded.
+
+
+
+watt.data<-
+  read_excel(
+    path = here(
+      "Data", "easy_trial_seperate_schemes", "_b_visit__acute_exercise_bout_og__x_.data .xlsx"
+    ))%>%
+  mutate(
+    timepoint = factor(
+      case_when(
+        grepl(
+          "isit 3", task_name
+        ) ~ "baseline",
+        grepl(
+          "isit 6", task_name
+        ) ~ "followup",
+        T~ NA_character_
+      ),levels = c("baseline", "followup")
+    )
+  )%>%
+  dplyr::select(
+    id, timepoint, treatment,
+    dato_acute_exercise_bout:væske_indtaget_under_acute_exercise_bout_001, kommentarer_til_denne_træning
+  )
+
+sex.data <- 
+  read_excel(path =  here("Data","vo2max.xlsx"))|>
+  dplyr::filter(timepoint == "baseline")|>
+  dplyr::select(id, sex)
+```
+
+## Create Datasets
+
+```{r}
+df_acute_bout_pulse<-
+  left_join(
+    df_merged,
+    group_cytokine,
+    by = join_by(id) 
+  )%>%
+  left_join(
+    sex.hrmax.data, by = join_by(id, timepoint)
+  )%>%
+  mutate(
+    timepoint = factor(timepoint, levels = c("baseline", "followup")),
+    treat = factor(
+      case_when(
+        timepoint == "baseline" ~ "control",
+        T ~ treatment
+      ), levels = c("control", "exercise")
+    ),
+    treat2 = factor(
+      case_when(
+        timepoint == "baseline" ~ "baseline",
+        T ~ treatment
+      ), levels = c("baseline","control", "exercise")
+    ),
+    hr_percent_of_max = hr_bpm/hrmax * 100,
+    id_fix = factor(id),
+    time_sec = lubridate::period_to_seconds(lubri_time)
+  )%>%
+  left_join(
+    watt.data, by = join_by(id, timepoint, treatment)
+  )%>%
+  mutate(
+    watt = case_when(
+      time_sec < 0 ~ NA_real_,
+      time_sec < 60 * 05 ~ watt_under_op_varmning_1,
+      time_sec < 60 * 10 ~ opvarming_watt_2,
+      time_sec < 60 * 14 ~ watt_1_interval,
+      time_sec < 60 * 17 ~ watt_1_pause,
+      time_sec < 60 * 21 ~ watt_2_interval,
+      time_sec < 60 * 24 ~ watt_2_pause,
+      time_sec < 60 * 28 ~ watt_3_interval,
+      time_sec < 60 * 31 ~ watt_3_pause,
+      time_sec < 60 * 35 ~ watt_4_interval,
+      time_sec < 60 * 38 ~ watt_4_pause,
+      time_sec<= 60 * 45 ~ watt_nedkøling,
+      T~ NA_real_
+    )
+  )%>%
+  mutate(
+    watt_percent_max =
+      watt / watt_max *100
+  )
+
+
+watt.aucs<-
+  df_acute_bout_pulse%>%
+  dplyr::select(
+    id, timepoint, lubri_time, watt
+  )%>%
+  group_by(id, timepoint)%>%
+  dplyr::summarise(
+    WATT_AUC =
+      AUC(
+        x=lubri_time,
+        y=watt,
+    method = "spline", 
+    na.rm=T,
+      )
+  )
+write_xlsx(
+  watt.aucs,
+  path = (here("Data", "Acute Bout", "watt_auc.xlsx")))
+
+write_xlsx(
+  df_acute_bout_pulse,
+  path = (here("Data", "Acute Bout", "Acute_bout_data.xlsx")))
+
+  
+av_bpms_watt<-
+  LMMstar::summarize(  formula= hr_bpm+watt~
+                        time + treat2,
+                      data = df_acute_bout_pulse, na.rm=T)
+
+av_bpms_IFN_low<-
+  LMMstar::summarize(  formula= hr_bpm+watt~
+                        time + treat2,
+                      data = df_acute_bout_pulse%>%
+                        dplyr::filter(ifn_1_netto <= 2)
+                      , na.rm=T)
+
+
+av_bpms_IFN_high<-
+  LMMstar::summarize(  formula= hr_bpm+watt~
+                        time + treat2,
+                      data = df_acute_bout_pulse%>%
+                        dplyr::filter(ifn_1_netto > 2)
+                      , na.rm=T)
+
+av_percent_bpms<-
+  LMMstar::summarize(  formula= hr_percent_of_max + watt_percent_max~
+                        time + treat2,
+                      data = df_acute_bout_pulse, na.rm=T)
+
+av_percent_bpms_IFN_low<-
+  LMMstar::summarize(  formula= hr_percent_of_max+ watt_percent_max~
+                        time + treat2,
+                      data = df_acute_bout_pulse%>%
+                        dplyr::filter(ifn_1_netto <= 2)
+                      , na.rm=T)
+
+
+av_percent_bpms_IFN_high<-
+  LMMstar::summarize(  formula= hr_percent_of_max+ watt_percent_max~
+                        time + treat2,
+                      data = df_acute_bout_pulse%>%
+                        dplyr::filter(ifn_1_netto > 2)
+                      , na.rm=T)
+
+
+##Save summary stats
+
+write_xlsx(
+  av_bpms_watt,
+  path = here("Data", "Acute Bout", "SummaryHR.xlsx")
+)
+
+write_xlsx(
+  av_percent_bpms,
+  path =  here("Data", "Acute Bout", "SummaryHRPercentofMax.xlsx")
+)
+
+write_xlsx(
+  df_acute_bout_pulse,
+  path = here("Data", "Acute Bout", "df_acute_bout_pulse.xlsx")
+)
+
+```
+
+## Consort flowchart
+
+```{r}
+#Create document to test for whether there was an acute bout
+acute_bout_done<-
+  df_acute_bout_pulse%>%
+  group_by(id, timepoint)%>%
+  slice(1)%>%
+  dplyr::select(id, timepoint, date)%>%
+  mutate(acute_bout = T)%>%
+  pivot_wider(
+    id_cols = id,
+    names_from = timepoint,
+    values_from = c(acute_bout, date)
+  )
+
+library(consort)
+ListContacted<-read_excel(path=here("Data/ContactedList.xlsx"))%>%
+  mutate(id=to_snake_case(Allocation_ID))%>%
+  left_join(group_cytokine)%>%
+  left_join(acute_bout_done)%>%
+ # mutate(acute_bout_baseline = case_when(
+#    is.na(acute_bout_baseline) ~ F,
+#    T ~ acute_bout_baseline
+#  ),
+#  acute_bout_followup = case_when(
+#    is.na(acute_bout_followup) ~ F,
+#    T ~ acute_bout_followup
+#  ))%>%
+  mutate(
+    exclusion = `Reason for decline`
+  )
+g <- consort_plot(data = ListContacted,
+                  orders = c(Screeningnr = "SLE Patients contacted",
+                            exclusion    = "Excluded/Could not participate",
+                            id   = "Included in main trial Baseline assessments",
+                            acute_bout_baseline = "Acute Bout at baseline",
+                            treatment     = "Randomized",
+                            subjid_notdosed = "Did not begin intervention",
+                            sbujid_dosed = "Included in the mITT",
+                             
+                             #lost_followup = "Did not complete intervention",
+                             #followup = "Included main trial Followup assessments",
+                            acute_bout_followup = "Acute Bout at followup",
+                            acute_bout_followup = "Number analysed"
+                             ),
+                  side_box = c("exclusion", 
+                               "subjid_notdosed"#,
+                               #"lost_followup"
+                               ),
+                  allocation = "treatment",
+                  labels = c("1" = "Assessed in Outpatient Clinic", 
+                             "2" = "Screening and Baseline Assessments",
+                             "4" = "Randomization", 
+                             "6" = "Exercise", 
+                             "7" = "End of trial",
+                             "8" = "Number analysed"),
+                  cex = 0.6) 
+#install.packages("DiagrammeR")
+#library(DiagrammeR)
+plot(g)
+g
+
+ggplot2::ggsave(filename = here("output","Acute Bout","graphics","consort_diagram.jpg"), 
+                plot   = build_grid(g), 
+                width  = 180, 
+                height = 180,
+                units = "mm",
+                dpi = 300)
+
+```
+
+## Some quick graphics to get a quick idea of what we are looking at.
+
+```{r}
+df_acute_bout_pulse<-
+  df_acute_bout_pulse%>%
+    dplyr::filter(
+      lubri_time<2700
+    )
+
+
+mean_SEM_BPMs_WATT<-
+  av_bpms_watt%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = mean,
+      color = outcome,
+      fill = outcome))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = mean + sd/sqrt(observed),
+        ymin = mean - sd/sqrt(observed)),
+    alpha = 0.2)+
+  labs(
+    title = "mean +/- SEM of heart rate and resistance")+
+  ylab("")+
+  xlab("Time (seconds)")+
+  facet_wrap(
+    ~treat2
+  )
+mean_SEM_BPMs_WATT
+
+median_q1q3_BPMs_WATT<-
+av_bpms_watt%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = median,
+      color = outcome,
+      fill = outcome
+    ))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = q3,
+        ymin = q1),
+    alpha = 0.2
+  )+
+  labs(
+    title = "median [q1,q3] of heart rate and resistance")+
+  ylab("")+
+  xlab("Time (seconds)")
+median_q1q3_BPMs_WATT
+median_q1q3_BPMs_WATT%>%
+  ggsave(
+    plot = .,
+    filename = here("Output","Acute Bout","Graphics","Median_q1q2_BPMS_WATT.jpg")
+  )
+
+median_q1q3_BPMs_WATT_Facet<-
+av_bpms_watt%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = median,
+      color = outcome,
+      fill = outcome
+    ))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = q3,
+        ymin = q1),
+    alpha = 0.2
+  )+
+  labs(
+    title = "median [q1,q3] of heart rate and resistance")+
+  ylab("")+
+  xlab("Time (seconds)")+
+  facet_grid(
+    ~treat2
+  )
+median_q1q3_BPMs_WATT_Facet
+
+median_q1q3_BPMs_WATT_Facet%>%
+  ggsave(
+    plot = .,
+    filename = here("Output","Acute Bout","Graphics","Median_q1q2_BPMS_WATT_FACET.jpg")
+  )
+```
+
+```{r}
+mean_SEM_BPMs_WATT_percentage<-
+av_percent_bpms%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = mean,
+      color = outcome,
+      fill = outcome))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = mean + sd/sqrt(observed),
+        ymin = mean - sd/sqrt(observed)),
+    alpha = 0.2)+
+  labs(
+    title = "mean +/- SEM of heart rate percentage and resistance percentage")+
+  ylab("")+
+  xlab("Time (seconds)")+
+  facet_wrap(
+    ~treat2
+  )
+mean_SEM_BPMs_WATT_percentage
+
+median_q1q3_BPMs_WATT_percentage<-
+av_percent_bpms%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = median,
+      color = outcome,
+      fill = outcome
+    ))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = q3,
+        ymin = q1),
+    alpha = 0.2
+  )+
+  labs(
+    title = "median [q1,q3] of heart rate percentage and resistance percentage")+
+  ylab("")+
+  xlab("Time (seconds)")+
+  facet_wrap(
+    ~treat2
+  )
+median_q1q3_BPMs_WATT_percentage
+```
+
+```{r}
+#TODO Stratified (on IFN-1) graphs
+
+average_percent_bpms_graph_lowIFN<-
+  av_percent_bpms_IFN_low%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = mean,
+      color = outcome,
+      fill = outcome))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = mean + sd/sqrt(observed),
+        ymin = mean - sd/sqrt(observed)),
+    alpha = 0.2)+
+  labs(
+    title = "Low IFN",
+    subtitle = "mean +/- SEM of heart rate percentage and resistance percentage")+
+  ylab("")+
+  xlab("Time (seconds)")+
+  facet_wrap(
+    ~treat2
+  )
+
+
+average_percent_bpms_graph_highIFN<-
+  av_percent_bpms_IFN_high%>%
+  dplyr::filter(
+    hms(time)<2701
+  )%>%
+  ggplot(
+    aes(
+      x = hms(time),
+      y = mean,
+      color = outcome,
+      fill = outcome))+
+  geom_line()+
+  theme_bw()+
+  geom_ribbon(
+    aes(ymax = mean + sd/sqrt(observed),
+        ymin = mean - sd/sqrt(observed)),
+    alpha = 0.2)+
+  labs(
+    title = "High IFN",
+    subtitle = "mean +/- SEM of heart rate percentage and resistance percentage")+
+  ylab("")+
+  xlab("Time (seconds)")+
+  facet_wrap(
+    ~treat2
+  )
+
+library(patchwork)
+average_percent_bpms_graph_highIFN/average_percent_bpms_graph_lowIFN
+```
+
+##Data frame to find maximal slopes for each individual
+
+```{r}
+#TODO find max og hældning af pulskurver. DONE
+#Test frollsum and splinefun functions
+
+
+df_acute_bout_pulse<-
+  df_acute_bout_pulse%>%
+dplyr::filter(
+  id != "lup_032"
+)%>%
+  group_by(id, timepoint)%>%
+  mutate(hr_slope = {
+    # Remove rows with missing heart rate values
+    valid_data <- na.omit(data.frame(time_sec, hr_bpm))
+    # Fit a smooth spline to the heart rate data over time
+    spline_fit <- smooth.spline(x=valid_data$time_sec, y=valid_data$hr_bpm, all.knots =T, df = 1000)
+    
+    # Calculate the derivative (slope) of the spline at each time point
+    slope_values <- predict(spline_fit, time_sec, deriv = 1)$y
+    
+    # Return the slope values for each observation
+    slope_values
+  },
+  hr_pct_slope = {
+    # Remove rows with missing heart rate values
+    valid_data <- na.omit(data.frame(time_sec, hr_percent_of_max))
+    # Fit a smooth spline to the heart rate data over time
+    spline_fit <- smooth.spline(x=valid_data$time_sec, y=valid_data$hr_percent_of_max, all.knots =T, df = 1000)
+    
+    # Calculate the derivative (slope) of the spline at each time point
+    slope_values <- predict(spline_fit, time_sec, deriv = 1)$y
+    
+    # Return the slope values for each observation
+    slope_values
+  },
+  hr_slope_30secsum = 
+    frollsum(x=hr_slope, n = 30, align="center" ),
+  hrpct_slope_30secsum = 
+    frollsum(x=hr_pct_slope, n = 30, align="center" )) %>%
+  ungroup()
+
+
+df_acute_bout_pulse_summary<-
+  df_acute_bout_pulse%>%
+  group_by(id, timepoint)%>%
+  dplyr::summarise(
+    ifn_1_netto = ifn_1_netto[1],
+    sex = sex[1],
+    hrmax = hrmax[1],
+    treat = treat[1],
+    #Interval 1
+    slope.in_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*9.5 & time_sec < 60*15.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    slope.out_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*10.5 & time_sec < 60*15.5)
+      
+      #Get highest 30_second slope, remove NAs
+    min(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    timezone5_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_percent_of_max)%>%
+        dplyr::filter(time_sec > 60*9.5 & time_sec < 60*15.5)%>%
+        dplyr::filter(hr_percent_of_max>=85)%>%
+        nrow()
+    },
+    #Interval % of max
+    slope.pct.in_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*9.5 & time_sec < 60*15.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    slope.out_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*10.5 & time_sec < 60*15.5)
+      
+      #Get highest 30_second slope, remove NAs
+    min(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    timezone5_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_percent_of_max)%>%
+        dplyr::filter(time_sec > 60*9.5 & time_sec < 60*15.5)%>%
+        dplyr::filter(hr_percent_of_max>=85)%>%
+        nrow()
+    },
+    
+    max_hr_interval1 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*10.5 & time_sec < 60*15.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_bpm, na.rm = T)},
+    max_hr_perc_of_max_interval1 = max_hr_interval1/hrmax*100,
+     #Interval 2
+    slope.in_interval2 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*16.5 & time_sec < 60*22.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_slope_30secsum, na.rm = T)},
+   
+    slope.out_interval2 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*17.5 & time_sec < 60*22.5)
+      
+      #Get highest 30_second slope, remove NAs
+    min(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    timezone5_interval2 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_percent_of_max)%>%
+        dplyr::filter(time_sec > 60*16.5 & time_sec < 60*22.5)%>%
+        dplyr::filter(hr_percent_of_max>=85)%>%
+        nrow()
+    },
+    max_hr_interval2 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*16.5 & time_sec < 60*22.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_bpm, na.rm = T)},
+    max_hr_perc_of_max_interval2 = max_hr_interval2/hrmax*100,
+    #Interval 3
+    slope.in_interval3 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*23.5 & time_sec < 60*29.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    slope.out_interval3 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*24.5 & time_sec < 60*29.5)
+      
+      #Get highest 30_second slope, remove NAs
+    min(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    timezone5_interval3 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_percent_of_max)%>%
+        dplyr::filter(time_sec > 60*23.5 & time_sec < 60*29.5)%>%
+        dplyr::filter(hr_percent_of_max>=85)%>%
+        nrow()
+    },
+    max_hr_interval3 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*23.5 & time_sec < 60*29.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_bpm, na.rm = T)},
+    max_hr_perc_of_max_interval3 = max_hr_interval3/hrmax*100,
+    #Interval 4
+    slope.in_interval4 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*30.5 & time_sec < 60*36.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    slope.out_interval4 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_slope_30secsum
+      )%>%
+        dplyr::filter(time_sec > 60*31.5 & time_sec < 60*36.5)
+      
+      #Get highest 30_second slope, remove NAs
+    min(search_area$hr_slope_30secsum, na.rm = T)},
+    
+    timezone5_interval4 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_percent_of_max)%>%
+        dplyr::filter(time_sec > 60*30.5 & time_sec < 60*36.5)%>%
+        dplyr::filter(hr_percent_of_max>=85)%>%
+        nrow()
+    },
+    
+    max_hr_interval4 = {
+      #Define search area
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*30.5 & time_sec < 60*36.5)
+      
+      #Get highest 30_second slope, remove NAs
+    max(search_area$hr_bpm, na.rm = T)},
+    max_hr_perc_of_max_interval4 = max_hr_interval4/hrmax*100,
+    mean.hr.1min.past = {
+      #Define search area  from minute 0 to 1 after exercise
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*35-1 & time_sec < 60*36+1)
+      
+      #Get mean HR 1 minutes after exercise, deduct from max of interval4
+    mean(search_area$hr_bpm, na.rm = T)},
+    mean.hr.2min.past = {
+      #Define search area  from minute 0 to 1 after exercise
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*36-1 & time_sec < 60*37+1)
+      
+      #Get mean HR 1 minutes after exercise, deduct from max of interval4
+    mean(search_area$hr_bpm, na.rm = T)},
+    HRR1 = {
+      #Define search area  from minute 0 to 1 after exercise
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*35-1 & time_sec < 60*36+1)
+      
+      #Get mean HR 1 minutes after exercise, deduct from max of interval4
+    max(max_hr_interval1,max_hr_interval2,max_hr_interval3,max_hr_interval4, na.rm=T)-mean(search_area$hr_bpm, na.rm = T)},
+    HRR2 = {
+      #Define search area from minute 1 to 2 after exercise
+      search_area <- data.frame(
+        time_sec, hr_bpm
+      )%>%
+        dplyr::filter(time_sec > 60*36-1 & time_sec < 60*37+1)
+      
+      #Get mean HR 2 minutes after exercise, deduct from max HR during bout
+    max(max_hr_interval1,max_hr_interval2,max_hr_interval3,max_hr_interval4, na.rm=T) - mean(search_area$hr_bpm, na.rm = T)}
+    
+  )%>%
+  mutate(
+    slope.out_interval4 = case_when(
+      slope.out_interval4 == Inf ~ NA_real_,
+      T~slope.out_interval4
+    )
+  )
+
+## We need to also add HR_percentage of max
+
+df_acute_bout_pulse_summary
+View(df_acute_bout_pulse_summary)
+group_cytokine
+
+df_hr_change_group <- 
+  df_acute_bout_pulse_summary %>%
+  left_join(
+    group_cytokine
+  )%>%
+  mutate(
+    treat = case_when(
+      timepoint == "baseline" ~ "control",
+      T~treatment
+    )
+  )%>%left_join(
+    sex.data
+  )
+```
+
+## Table 1
+
+```{r}
+library(table1)
+label(df_hr_change_group$slope.in_interval1) <- "Slope into first interval"
+label(df_hr_change_group$slope.in_interval2) <- "Slope into second interval"
+label(df_hr_change_group$slope.in_interval3) <-"Slope into third interval"
+label(df_hr_change_group$slope.in_interval4) <-"Slope into fourth interval"
+label(df_hr_change_group$slope.out_interval1) <- "Slope out of first interval"
+label(df_hr_change_group$slope.out_interval2)<- "Slope out of second interval"
+label(df_hr_change_group$slope.out_interval3)<- "Slope out of third interval"
+label(df_hr_change_group$slope.out_interval4)<- "Slope out of fourth interval"
+label(df_hr_change_group$max_hr_interval1) <- "Maximal HR in first interval"
+label(df_hr_change_group$max_hr_interval2)<- "Maximal HR in second interval"
+label(df_hr_change_group$max_hr_interval3)<- "Maximal HR in third interval"
+label(df_hr_change_group$max_hr_interval4)<- "Maximal HR in fourth interval"
+label(df_hr_change_group$max_hr_perc_of_max_interval1)<- "Maximal %HRmax in first interval"
+label(df_hr_change_group$max_hr_perc_of_max_interval2)<- "Maximal %HRmax in second interval"
+label(df_hr_change_group$max_hr_perc_of_max_interval3)<- "Maximal %HRmax in third interval"
+label(df_hr_change_group$max_hr_perc_of_max_interval4)<- "Maximal %HRmax in fourth interval"
+label(df_hr_change_group$timezone5_interval1)<- "Time in Zone 5 in first interval"
+label(df_hr_change_group$timezone5_interval2)<- "Time in Zone 5 in second interval"
+label(df_hr_change_group$timezone5_interval3)<- "Time in Zone 5 in third interval"
+label(df_hr_change_group$timezone5_interval4)<- "Time in Zone 5 in fourth interval"
+label(df_hr_change_group$HRR1)<- paste0(expression(delta),"HRR1")
+label(df_hr_change_group$HRR2)<- paste0(expression(delta),"HRR2")
+
+units(df_hr_change_group$slope.in_interval1) <- "BPM/s"
+units(df_hr_change_group$slope.in_interval2) <- "BPM/s"
+units(df_hr_change_group$slope.in_interval3) <-"BPM/s"
+units(df_hr_change_group$slope.in_interval4) <-"BPM/s"
+units(df_hr_change_group$slope.out_interval1) <- "BPM/s"
+units(df_hr_change_group$slope.out_interval2)<- "BPM/s"
+units(df_hr_change_group$slope.out_interval3)<- "BPM/s"
+units(df_hr_change_group$slope.out_interval4)<- "BPM/s"
+units(df_hr_change_group$max_hr_interval1) <- "BPM"
+units(df_hr_change_group$max_hr_interval2)<- "BPM"
+units(df_hr_change_group$max_hr_interval3)<- "BPM"
+units(df_hr_change_group$max_hr_interval4)<- "BPM"
+units(df_hr_change_group$max_hr_perc_of_max_interval1)<- "%"
+units(df_hr_change_group$max_hr_perc_of_max_interval2)<- "%"
+units(df_hr_change_group$max_hr_perc_of_max_interval3)<- "%"
+units(df_hr_change_group$max_hr_perc_of_max_interval4)<- "%"
+units(df_hr_change_group$timezone5_interval1)<- "s"
+units(df_hr_change_group$timezone5_interval2)<- "s"
+units(df_hr_change_group$timezone5_interval3)<- "s"
+units(df_hr_change_group$timezone5_interval4)<- "s"
+units(df_hr_change_group$HRR1)<- "BPM"
+units(df_hr_change_group$HRR2)<- "BPM"
+
+t1<-
+  df_hr_change_group %>%
+  dplyr::filter(
+    timepoint == "baseline"
+  )%>%
+  table1(
+    ~ sex + 
+      slope.in_interval1 + slope.in_interval2+ slope.in_interval3+ slope.in_interval4+
+      slope.out_interval1 +slope.out_interval2 +slope.out_interval3+slope.out_interval4+
+      max_hr_interval1 + max_hr_interval2+max_hr_interval3+max_hr_interval4+
+      max_hr_perc_of_max_interval1+max_hr_perc_of_max_interval2+max_hr_perc_of_max_interval3+max_hr_perc_of_max_interval4+
+      timezone5_interval1 + timezone5_interval2 + timezone5_interval3 + timezone5_interval4 + 
+      HRR1 + HRR2 | treatment
+      
+      ,
+    data = .
+  )
+
+t1%>%t1flex()
+
+t1%>%
+  as.data.frame()%>%
+  write_xlsx(
+    path = here("Output","Acute Bout","Tables","t1_pulse.xlsx")
+  )
+
+t1%>%t1flex()%>%save_as_docx(
+  path = here("Output","Acute Bout", "Table1_RAW.docx")
+)
+
+  df_hr_change_group_baseline<-
+    df_hr_change_group %>%
+  dplyr::filter(
+    timepoint == "baseline"
+  )
+median_ifn_elevated <-
+  df_hr_change_group_baseline%>%
+  dplyr::filter(
+    ifn_1_netto >2
+  )%>%
+  pull(ifn_1_netto)%>%
+  median(.,na.rm = T)
+  
+  
+df_hr_change_group_baseline<-
+  df_hr_change_group_baseline%>%
+  mutate(
+    ifn_1_elevated =
+      factor(
+        case_when(
+          ifn_1_netto < 2 ~ "Not Elevated",
+          ifn_1_netto < median_ifn_elevated ~ "Slightly Elevated",
+          ifn_1_netto > median_ifn_elevated ~ "Highly Elevated",
+          T ~ NA_character_
+        ),
+        levels = c("Not Elevated","Slightly Elevated", "Highly Elevated")
+      )
+  )
+
+
+t1_elevated<-
+  df_hr_change_group_baseline%>%
+  dplyr::filter(
+    !is.na(ifn_1_elevated)
+  )%>%
+  table1(
+    ~ sex + 
+      slope.in_interval1 + slope.in_interval2+ slope.in_interval3+ slope.in_interval4+
+      slope.out_interval1 +slope.out_interval2 +slope.out_interval3+slope.out_interval4+
+      max_hr_interval1 + max_hr_interval2+max_hr_interval3+max_hr_interval4+
+      max_hr_perc_of_max_interval1+max_hr_perc_of_max_interval2+max_hr_perc_of_max_interval3+max_hr_perc_of_max_interval4+
+      timezone5_interval1 + timezone5_interval2 + timezone5_interval3 + timezone5_interval4 + 
+      HRR1 + HRR2 | treatment + ifn_1_elevated
+      
+      ,
+    data = .
+  )
+
+
+t1_elevated%>%
+  t1flex()%>%save_as_docx(
+  path = here("Output","Acute Bout", "Table1_elevated_RAW.docx")
+)
+
+t1_elevated%>%
+  as.data.frame()%>%
+  write_xlsx(
+    path = here("Output","Acute Bout","Tables","t1_pulse_elevated.xlsx")
+  )
+
+df_hr_change_group %>%
+  write_xlsx(
+    path = here("data", "Acute Bout", "HR_Change_group.xlsx")
+  )
+```
+
+## Model on HRR
+
+Okay with this dataframe we can test the intervals as models, but we probably need them in long format to be able to test all of them. We do the simple test each interval in/out as seperate LMMs first, then we might be able to combine into one model with 8 slopes (in/out) per individual.
+
+```{r}
+#HRR 1
+HRR1_nointeract_lmm<-lmm(
+  formula=
+    HRR1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(HRR1_nointeract_lmm)
+levels(HRR1_nointeract_lmm)
+coef(HRR1_nointeract_lmm)
+plot(HRR1_nointeract_lmm, type = "scatterplot")
+plot(HRR1_nointeract_lmm, type = "scatterplot2")
+plot(HRR1_nointeract_lmm, type = "qqplot")
+plot(HRR1_nointeract_lmm, type = "correlation")
+plot(HRR1_nointeract_lmm,
+     color="treatment")
+
+#HRR 2
+HRR2_nointeract_lmm<-lmm(
+  formula=
+    HRR2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(HRR2_nointeract_lmm)
+levels(HRR2_nointeract_lmm)
+coef(HRR2_nointeract_lmm)
+plot(HRR2_nointeract_lmm, type = "scatterplot")
+plot(HRR2_nointeract_lmm, type = "scatterplot2")
+plot(HRR2_nointeract_lmm, type = "qqplot")
+plot(HRR2_nointeract_lmm, type = "correlation")
+plot(HRR2_nointeract_lmm,
+     color="treatment")
+
+
+#HRR1 Interact
+HRR1_lmm<-lmm(
+  formula=
+    HRR1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(HRR1_lmm)
+levels(HRR1_lmm)
+coef(HRR1_lmm)
+plot(HRR1_lmm, type = "scatterplot")
+plot(HRR1_lmm, type = "scatterplot2")
+plot(HRR1_lmm, type = "qqplot")
+plot(HRR1_lmm, type = "correlation")
+
+HRR1_plot<-
+  plot(HRR1_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     at = data.frame(sex = "F"))
+
+ggplotly(HRR1_plot$plot)
+
+#HRR2 Interact
+HRR2_lmm<-lmm(
+  formula=
+    HRR2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(HRR2_lmm)
+levels(HRR2_lmm)
+coef(HRR2_lmm)
+plot(HRR2_lmm, type = "scatterplot")
+plot(HRR2_lmm, type = "scatterplot2")
+plot(HRR2_lmm, type = "qqplot")
+plot(HRR2_lmm, type = "correlation")
+
+HRR2_plot<-
+  plot(HRR2_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     at = data.frame(sex = "F"))
+
+ggplotly(HRR2_plot$plot)
+
+```
+
+## Model on slopes in
+
+Okay with this dataframe we can test the intervals as models, but we probably need them in long format to be able to test all of them. We do the simple test each interval in/out as seperate LMMs first, then we might be able to combine into one model with 8 slopes (in/out) per individual.
+
+```{r}
+#Slope 1
+slope1.in_nointeract_lmm<-lmm(
+  formula=
+    slope.in_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.in_nointeract_lmm)
+levels(slope1.in_nointeract_lmm)
+coef(slope1.in_nointeract_lmm)
+plot(slope1.in_nointeract_lmm, type = "scatterplot")
+plot(slope1.in_nointeract_lmm, type = "scatterplot2")
+plot(slope1.in_nointeract_lmm, type = "qqplot")
+plot(slope1.in_nointeract_lmm, type = "correlation")
+plot(slope1.in_nointeract_lmm,
+     color="treatment")
+
+#Slope 2
+slope2.in_nointeract_lmm<-lmm(
+  formula=
+    slope.in_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.in_nointeract_lmm)
+levels(slope2.in_nointeract_lmm)
+coef(slope2.in_nointeract_lmm)
+plot(slope2.in_nointeract_lmm, type = "scatterplot")
+plot(slope2.in_nointeract_lmm, type = "scatterplot2")
+plot(slope2.in_nointeract_lmm, type = "qqplot")
+plot(slope2.in_nointeract_lmm, type = "correlation")
+plot(slope2.in_nointeract_lmm,
+     color="treatment")
+
+
+#slope 3
+slope3.in_nointeract_lmm<-lmm(
+  formula=
+    slope.in_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.in_nointeract_lmm)
+plot(slope3.in_nointeract_lmm, type = "scatterplot")
+plot(slope3.in_nointeract_lmm, type = "scatterplot2")
+plot(slope3.in_nointeract_lmm, type = "qqplot")
+plot(slope3.in_nointeract_lmm, type = "correlation")
+plot(slope3.in_nointeract_lmm,
+     color="treatment")
+
+#slope 4
+slope4.in_nointeract_lmm<-lmm(
+  formula=
+    slope.in_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.in_nointeract_lmm)
+plot(slope4.in_nointeract_lmm, type = "scatterplot")
+plot(slope4.in_nointeract_lmm, type = "scatterplot2")
+plot(slope4.in_nointeract_lmm, type = "qqplot")
+plot(slope4.in_nointeract_lmm, type = "correlation")
+plot(slope4.in_nointeract_lmm,
+     color="treatment")
+
+#Slope 1
+slope1.in_lmm<-lmm(
+  formula=
+    slope.in_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.in_lmm)
+levels(slope1.in_lmm)
+coef(slope1.in_lmm)
+plot(slope1.in_lmm, type = "scatterplot")
+plot(slope1.in_lmm, type = "scatterplot2")
+plot(slope1.in_lmm, type = "qqplot")
+plot(slope1.in_lmm, type = "correlation")
+
+slope1_plot<-
+  plot(slope1.in_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope1_plot$plot)
+
+#Slope 2
+slope2.in_lmm<-lmm(
+  formula=
+    slope.in_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.in_lmm)
+levels(slope2.in_lmm)
+coef(slope2.in_lmm)
+plot(slope2.in_lmm, type = "scatterplot")
+plot(slope2.in_lmm, type = "scatterplot2")
+plot(slope2.in_lmm, type = "qqplot")
+plot(slope2.in_lmm, type = "correlation")
+
+slope2_plot<-
+  plot(slope2.in_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope2_plot$plot)
+
+#slope 3
+slope3.in_lmm<-lmm(
+  formula=
+    slope.in_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.in_lmm)
+levels(slope3.in_lmm)
+coef(slope3.in_lmm)
+plot(slope3.in_lmm, type = "scatterplot")
+plot(slope3.in_lmm, type = "scatterplot2")
+plot(slope3.in_lmm, type = "qqplot")
+plot(slope3.in_lmm, type = "correlation")
+
+slope3_plot<-
+  plot(slope3.in_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope3_plot$plot)
+
+
+#slope 4
+slope4.in_lmm<-lmm(
+  formula=
+    slope.in_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.in_lmm)
+levels(slope4.in_lmm)
+coef(slope4.in_lmm)
+plot(slope4.in_lmm, type = "scatterplot")
+plot(slope4.in_lmm, type = "scatterplot2")
+plot(slope4.in_lmm, type = "qqplot")
+plot(slope4.in_lmm, type = "correlation")
+
+slope4_plot<-
+  plot(slope4.in_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope4_plot$plot)
+```
+
+## Model on slopes out
+
+Okay with this dataframe we can test the intervals as models, but we probably need them in long format to be able to test all of them. We do the simple test each interval in/out as seperate LMMs first, then we might be able to combine into one model with 8 slopes (in/out) per individual.
+
+```{r}
+
+#Slope 1
+slope1.out_nointeract_lmm<-lmm(
+  formula=
+    slope.out_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.out_nointeract_lmm)
+levels(slope1.out_nointeract_lmm)
+coef(slope1.out_nointeract_lmm)
+plot(slope1.out_nointeract_lmm, type = "scatterplot")
+plot(slope1.out_nointeract_lmm, type = "scatterplot2")
+plot(slope1.out_nointeract_lmm, type = "qqplot")
+plot(slope1.out_nointeract_lmm, type = "correlation")
+plot(slope1.out_nointeract_lmm,
+     color="treatment")
+
+#Slope 2
+slope2.out_nointeract_lmm<-lmm(
+  formula=
+    slope.out_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.out_nointeract_lmm)
+levels(slope2.out_nointeract_lmm)
+coef(slope2.out_nointeract_lmm)
+plot(slope2.out_nointeract_lmm, type = "scatterplot")
+plot(slope2.out_nointeract_lmm, type = "scatterplot2")
+plot(slope2.out_nointeract_lmm, type = "qqplot")
+plot(slope2.out_nointeract_lmm, type = "correlation")
+plot(slope2.out_nointeract_lmm,
+     color="treatment")
+
+
+#slope 3
+slope3.out_nointeract_lmm<-lmm(
+  formula=
+    slope.out_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.out_nointeract_lmm)
+plot(slope3.out_nointeract_lmm, type = "scatterplot")
+plot(slope3.out_nointeract_lmm, type = "scatterplot2")
+plot(slope3.out_nointeract_lmm, type = "qqplot")
+plot(slope3.out_nointeract_lmm, type = "correlation")
+plot(slope3.out_nointeract_lmm,
+     color="treatment")
+
+#slope 4
+slope4.out_nointeract_lmm<-lmm(
+  formula=
+    slope.out_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.out_nointeract_lmm)
+plot(slope4.out_nointeract_lmm, type = "scatterplot")
+plot(slope4.out_nointeract_lmm, type = "scatterplot2")
+plot(slope4.out_nointeract_lmm, type = "qqplot")
+plot(slope4.out_nointeract_lmm, type = "correlation")
+plot(slope4.out_nointeract_lmm,
+     color="treatment")
+
+
+#Slope 1
+slope1.out_lmm<-lmm(
+  formula=
+    slope.out_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.out_lmm)
+levels(slope1.out_lmm)
+coef(slope1.out_lmm)
+plot(slope1.out_lmm, type = "scatterplot")
+plot(slope1.out_lmm, type = "scatterplot2")
+plot(slope1.out_lmm, type = "qqplot")
+plot(slope1.out_lmm, type = "correlation")
+
+slope1_plot<-
+  plot(slope1.out_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope1_plot$plot)
+
+#Slope 2
+slope2.out_lmm<-lmm(
+  formula=
+    slope.out_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.out_lmm)
+levels(slope2.out_lmm)
+coef(slope2.out_lmm)
+plot(slope2.out_lmm, type = "scatterplot")
+plot(slope2.out_lmm, type = "scatterplot2")
+plot(slope2.out_lmm, type = "qqplot")
+plot(slope2.out_lmm, type = "correlation")
+
+slope2_plot<-
+  plot(slope2.out_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope2_plot$plot)
+
+#slope 3
+slope3.out_lmm<-lmm(
+  formula=
+    slope.out_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.out_lmm)
+levels(slope3.out_lmm)
+coef(slope3.out_lmm)
+plot(slope3.out_lmm, type = "scatterplot")
+plot(slope3.out_lmm, type = "scatterplot2")
+plot(slope3.out_lmm, type = "qqplot")
+plot(slope3.out_lmm, type = "correlation")
+
+slope3_plot<-
+  plot(slope3.out_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope3_plot$plot)
+
+
+#slope 4
+slope4.out_lmm<-lmm(
+  formula=
+    slope.out_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.out_lmm)
+levels(slope4.out_lmm)
+coef(slope4.out_lmm)
+plot(slope4.out_lmm, type = "scatterplot")
+plot(slope4.out_lmm, type = "scatterplot2")
+plot(slope4.out_lmm, type = "qqplot")
+plot(slope4.out_lmm, type = "correlation")
+
+slope4_plot<-
+  plot(slope4.out_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope4_plot$plot)
+```
+
+## Model on maximum
+
+Let's find the maximum of each slope and then make models on that.
+
+```{r}
+
+#Slope 1
+slope1.max_nointeract_lmm<-lmm(
+  formula=
+    max_hr_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.max_nointeract_lmm)
+levels(slope1.max_nointeract_lmm)
+coef(slope1.max_nointeract_lmm)
+plot(slope1.max_nointeract_lmm, type = "scatterplot")
+plot(slope1.max_nointeract_lmm, type = "scatterplot2")
+plot(slope1.max_nointeract_lmm, type = "qqplot")
+plot(slope1.max_nointeract_lmm, type = "correlation")
+plot(slope1.max_nointeract_lmm,
+     color="treatment")
+
+#Slope 2
+slope2.max_nointeract_lmm<-lmm(
+  formula=
+    max_hr_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.max_nointeract_lmm)
+levels(slope2.max_nointeract_lmm)
+coef(slope2.max_nointeract_lmm)
+plot(slope2.max_nointeract_lmm, type = "scatterplot")
+plot(slope2.max_nointeract_lmm, type = "scatterplot2")
+plot(slope2.max_nointeract_lmm, type = "qqplot")
+plot(slope2.max_nointeract_lmm, type = "correlation")
+plot(slope2.max_nointeract_lmm,
+     color="treatment")
+
+
+#slope 3
+slope3.max_nointeract_lmm<-lmm(
+  formula=
+    max_hr_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.max_nointeract_lmm)
+plot(slope3.max_nointeract_lmm, type = "scatterplot")
+plot(slope3.max_nointeract_lmm, type = "scatterplot2")
+plot(slope3.max_nointeract_lmm, type = "qqplot")
+plot(slope3.max_nointeract_lmm, type = "correlation")
+plot(slope3.max_nointeract_lmm,
+     color="treatment")
+
+#slope 4
+slope4.max_nointeract_lmm<-lmm(
+  formula=
+    max_hr_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.max_nointeract_lmm)
+plot(slope4.max_nointeract_lmm, type = "scatterplot")
+plot(slope4.max_nointeract_lmm, type = "scatterplot2")
+plot(slope4.max_nointeract_lmm, type = "qqplot")
+plot(slope4.max_nointeract_lmm, type = "correlation")
+plot(slope4.max_nointeract_lmm,
+     color="treatment")
+
+
+#Slope 1
+slope1.max_lmm<-lmm(
+  formula=
+    max_hr_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.max_lmm)
+levels(slope1.max_lmm)
+coef(slope1.max_lmm)
+plot(slope1.max_lmm, type = "scatterplot")
+plot(slope1.max_lmm, type = "scatterplot2")
+plot(slope1.max_lmm, type = "qqplot")
+plot(slope1.max_lmm, type = "correlation")
+
+slope1_plot<-
+  plot(slope1.max_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope1_plot$plot)
+
+#Slope 2
+slope2.max_lmm<-lmm(
+  formula=
+    max_hr_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.max_lmm)
+levels(slope2.max_lmm)
+coef(slope2.max_lmm)
+plot(slope2.max_lmm, type = "scatterplot")
+plot(slope2.max_lmm, type = "scatterplot2")
+plot(slope2.max_lmm, type = "qqplot")
+plot(slope2.max_lmm, type = "correlation")
+
+slope2_plot<-
+  plot(slope2.max_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope2_plot$plot)
+
+#slope 3
+slope3.max_lmm<-lmm(
+  formula=
+    max_hr_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.max_lmm)
+levels(slope3.max_lmm)
+coef(slope3.max_lmm)
+plot(slope3.max_lmm, type = "scatterplot")
+plot(slope3.max_lmm, type = "scatterplot2")
+plot(slope3.max_lmm, type = "qqplot")
+plot(slope3.max_lmm, type = "correlation")
+
+slope3_plot<-
+  plot(slope3.max_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope3_plot$plot)
+
+
+#slope 4
+slope4.max_lmm<-lmm(
+  formula=
+    max_hr_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.max_lmm)
+levels(slope4.max_lmm)
+coef(slope4.max_lmm)
+plot(slope4.max_lmm, type = "scatterplot")
+plot(slope4.max_lmm, type = "scatterplot2")
+plot(slope4.max_lmm, type = "qqplot")
+plot(slope4.max_lmm, type = "correlation")
+
+slope4_plot<-
+  plot(slope4.max_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope4_plot$plot)
+```
+
+## Model on max perc of hrmax
+
+Let's find the maximum of each slope and then make models on that.
+
+```{r}
+
+#Slope 1
+slope1.percmax_nointeract_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.percmax_nointeract_lmm)
+levels(slope1.percmax_nointeract_lmm)
+coef(slope1.percmax_nointeract_lmm)
+plot(slope1.percmax_nointeract_lmm, type = "scatterplot")
+plot(slope1.percmax_nointeract_lmm, type = "scatterplot2")
+plot(slope1.percmax_nointeract_lmm, type = "qqplot")
+plot(slope1.percmax_nointeract_lmm, type = "correlation")
+plot(slope1.percmax_nointeract_lmm,
+     color="treatment")
+
+#Slope 2
+slope2.percmax_nointeract_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.percmax_nointeract_lmm)
+levels(slope2.percmax_nointeract_lmm)
+coef(slope2.percmax_nointeract_lmm)
+plot(slope2.percmax_nointeract_lmm, type = "scatterplot")
+plot(slope2.percmax_nointeract_lmm, type = "scatterplot2")
+plot(slope2.percmax_nointeract_lmm, type = "qqplot")
+plot(slope2.percmax_nointeract_lmm, type = "correlation")
+plot(slope2.percmax_nointeract_lmm,
+     color="treatment")
+
+
+#slope 3
+slope3.percmax_nointeract_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.percmax_nointeract_lmm)
+plot(slope3.percmax_nointeract_lmm, type = "scatterplot")
+plot(slope3.percmax_nointeract_lmm, type = "scatterplot2")
+plot(slope3.percmax_nointeract_lmm, type = "qqplot")
+plot(slope3.percmax_nointeract_lmm, type = "correlation")
+plot(slope3.percmax_nointeract_lmm,
+     color="treatment")
+
+#slope 4
+slope4.percmax_nointeract_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.percmax_nointeract_lmm)
+plot(slope4.percmax_nointeract_lmm, type = "scatterplot")
+plot(slope4.percmax_nointeract_lmm, type = "scatterplot2")
+plot(slope4.percmax_nointeract_lmm, type = "qqplot")
+plot(slope4.percmax_nointeract_lmm, type = "correlation")
+plot(slope4.percmax_nointeract_lmm,
+     color="treatment")
+
+
+#Slope 1
+slope1.percmax_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval1 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope1.percmax_lmm)
+levels(slope1.percmax_lmm)
+coef(slope1.percmax_lmm)
+plot(slope1.percmax_lmm, type = "scatterplot")
+plot(slope1.percmax_lmm, type = "scatterplot2")
+plot(slope1.percmax_lmm, type = "qqplot")
+plot(slope1.percmax_lmm, type = "correlation")
+
+slope1_plot<-
+  plot(slope1.percmax_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope1_plot$plot)
+
+#Slope 2
+slope2.percmax_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval2 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope2.percmax_lmm)
+levels(slope2.percmax_lmm)
+coef(slope2.percmax_lmm)
+plot(slope2.percmax_lmm, type = "scatterplot")
+plot(slope2.percmax_lmm, type = "scatterplot2")
+plot(slope2.percmax_lmm, type = "qqplot")
+plot(slope2.percmax_lmm, type = "correlation")
+
+slope2_plot<-
+  plot(slope2.percmax_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope2_plot$plot)
+
+#slope 3
+slope3.percmax_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval3 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope3.percmax_lmm)
+levels(slope3.percmax_lmm)
+coef(slope3.percmax_lmm)
+plot(slope3.percmax_lmm, type = "scatterplot")
+plot(slope3.percmax_lmm, type = "scatterplot2")
+plot(slope3.percmax_lmm, type = "qqplot")
+plot(slope3.percmax_lmm, type = "correlation")
+
+slope3_plot<-
+  plot(slope3.percmax_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope3_plot$plot)
+
+
+#slope 4
+slope4.percmax_lmm<-lmm(
+  formula=
+    max_hr_perc_of_max_interval4 ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint | id,
+  structure = "UN",
+  data = df_hr_change_group
+)
+
+summary(slope4.percmax_lmm)
+levels(slope4.percmax_lmm)
+coef(slope4.percmax_lmm)
+plot(slope4.percmax_lmm, type = "scatterplot")
+plot(slope4.percmax_lmm, type = "scatterplot2")
+plot(slope4.percmax_lmm, type = "qqplot")
+plot(slope4.percmax_lmm, type = "correlation")
+
+slope4_plot<-
+  plot(slope4.percmax_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+ggplotly(slope4_plot$plot)
+```
+
+##Graphing individuals
+
+```{r eval = F}
+df_acute_bout_pulse%>%
+  dplyr::filter(
+  id == "lup_004"
+)%>%
+  dplyr::filter(
+    timepoint == "baseline"
+  )%>%
+  ggplot(aes(y=hr_slope_30secsum, x=time_sec))+
+  geom_line()
+         
+df_interval_1<-
+  df_acute_bout_pulse%>%
+  dplyr::filter(
+    lubri_time >570 & lubri_time< 15*60
+  )
+
+df_acute_bout_pulse%>%
+  dplyr::filter(
+    id == "lup_015" 
+  )%>%
+  ggplot(aes(x = time_sec, y = hr_bpm, color = 1))+
+  geom_line()+
+  geom_line(aes(y=watt))+
+  theme_bw()+
+  facet_wrap(~timepoint)
+
+#df_acute_bout_pulse%>%
+ # dplyr::filter(
+  #  id == "lup_035" 
+  #)%>%
+  #ggplot(aes(x = time_sec, y = hr_percent_of_max, color = 1))+
+  #geom_line()+
+  #geom_line(aes(y=watt_percent_max))+
+  #theme_bw()
+
+df_acute_bout_pulse%>%
+  dplyr::filter(
+    id == "lup_038" 
+  )%>%
+  dplyr::filter(
+    hr_percent_of_max >= 85
+  )%>%
+  dplyr::filter(
+    timepoint == "baseline"
+  )%>%
+  nrow()
+
+
+#TODO vend den her med Iben og Helga
+
+#TODO Find ud af om afsat energi afhænger af puls + IFN signatur + confounders
+
+#TODO Plot puls overfor resistance + confounders
+#df_acute_bout_pulse%>%
+ # ggplot(aes(x = watt, y = hr_bpm, color = treat))+
+  #geom_point()
+
+df_acute_bout_pulse%>%
+  dplyr::filter(id == "lup_031")%>%
+  dplyr::filter(timepoint == "baseline")%>%
+  ggplot(aes(x = lubri_time, y = watt))+
+  geom_line(aes(color="watt"))+
+  geom_line(aes(y = hr_bpm, color="hr_bpm"))+
+  theme_bw()
+
+
+df_acute_bout_pulse%>%
+  dplyr::filter(id == "lup_039")%>%
+  dplyr::filter(timepoint == "baseline")%>%
+  ggplot(aes(x = lubri_time, y = watt))+
+  geom_line(aes(color="watt"))+
+  geom_line(aes(y = hr_bpm, color="hr_bpm"))+
+  theme_bw()
+
+
+```
+
+##Create Long Data set
+
+```{r}
+
+long_df_hr_change_group<-
+  df_hr_change_group%>%pivot_longer(
+    cols = 7:27,
+    names_sep = "_interval",
+    names_to = c(".value", "interval")
+  )%>%
+  mutate(
+    timepoint_interval = paste0(
+      timepoint, interval
+    )
+  )
+
+```
+
+### Create LMM on long data so we can consider cross-interval covariances.
+
+```{r}
+
+#slope in
+slope_in_nointeract_lmm<-lmm(
+  formula=
+    slope.in ~ 
+    timepoint+
+    interval+
+    sex+
+    timepoint:interval+
+    timepoint:treat:interval,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(slope_in_nointeract_lmm)
+plot(slope_in_nointeract_lmm, type = "scatterplot")
+plot(slope_in_nointeract_lmm, type = "scatterplot2")
+plot(slope_in_nointeract_lmm, type = "qqplot")
+plot(slope_in_nointeract_lmm, type = "correlation")
+plot(slope_in_nointeract_lmm,
+     color="treatment")
+
+
+plot.slope_in_nointeract_lmm<-
+  plot(slope_in_nointeract_lmm,
+     color="treatment",
+     obs.alpha = 0.2,
+     at = data.frame(sex = "F"),
+     ci = F)
+plot(slope_in_nointeract_lmm,
+     color="treatment",
+     at = data.frame(sex = "F"),
+     ci.alpha = 0.1)
+
+export_plot.slope_in_nointeract_lmm<-
+  plot.slope_in_nointeract_lmm$plot+
+  labs(
+   y = "Maximal Heart Rate Change at start of the interval",
+   x = "Timepoint & Interval",
+   color = "Treatment"
+  )+
+  ylim(0,30)+
+  theme_bw()
+
+export_plot.slope_in_nointeract_lmm%>%
+  ggsave(
+    plot = .,
+    filename = here("output","acute bout", "graphics","plot.slope_in_nointeract_lmm.jpg")
+  )
+
+
+slope_in_interact_lmm<-lmm(
+  formula=
+    slope.in ~ 
+    timepoint+
+    interval+
+    sex+
+    ifn_1_netto+
+    timepoint:interval+
+    timepoint:treat:interval+
+    timepoint:treat:interval:ifn_1_netto,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(slope_in_interact_lmm)
+plot(slope_in_interact_lmm, type = "scatterplot")
+plot(slope_in_interact_lmm, type = "scatterplot2")
+plot(slope_in_interact_lmm, type = "qqplot")
+plot(slope_in_interact_lmm, type = "correlation")
+plot(slope_in_interact_lmm,
+     color="treatment")
+
+  plot(slope_in_interact_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+anova(slope_in_interact_lmm)
+
+#Slope Out
+
+slope_out_nointeract_lmm<-lmm(
+  formula=
+    slope.out ~ 
+    timepoint+
+    interval+
+    sex+
+    timepoint:interval+
+    timepoint:treat:interval,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(slope_out_nointeract_lmm)
+plot(slope_out_nointeract_lmm, type = "scatterplot")
+plot(slope_out_nointeract_lmm, type = "scatterplot2")
+plot(slope_out_nointeract_lmm, type = "qqplot")
+plot(slope_out_nointeract_lmm, type = "correlation")
+plot(slope_out_nointeract_lmm,
+     color="treatment")
+
+plot.slope_out_nointeract_lmm<-
+  plot(slope_out_nointeract_lmm,
+     color="treatment",
+     obs.alpha = 0.2,
+     at = data.frame(sex = "F"),
+     ci = F)
+plot(slope_out_nointeract_lmm,
+     color="treatment",
+     at = data.frame(sex = "F"),
+     ci.alpha = 0.1)
+
+export_plot.slope_out_nointeract_lmm<-
+  plot.slope_out_nointeract_lmm$plot+
+  labs(
+   y = "Maximal Heart Rate Change at end of interval",
+   x = "Timepoint & Interval",
+   color = "Treatment"
+  )+
+  ylim(0,-20)+
+  theme_bw()
+
+export_plot.slope_out_nointeract_lmm%>%
+  ggsave(
+    plot = .,
+    filename = here("output","acute bout", "graphics","plot.slope_out_nointeract_lmm.jpg")
+  )
+
+
+slope_out_interact_lmm<-lmm(
+  formula=
+    slope.out ~ 
+    timepoint+
+    interval+
+    sex+
+    ifn_1_netto+
+    timepoint:interval+
+    timepoint:treat:interval+
+    timepoint:treat:interval:ifn_1_netto,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(slope_out_interact_lmm)
+plot(slope_out_interact_lmm, type = "scatterplot")
+plot(slope_out_interact_lmm, type = "scatterplot2")
+plot(slope_out_interact_lmm, type = "qqplot")
+plot(slope_out_interact_lmm, type = "correlation")
+plot(slope_out_interact_lmm,
+     color="treatment")
+
+  plot(slope_out_interact_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+anova(slope_out_interact_lmm)
+
+
+#Max_HR
+
+max_hr_nointeract_lmm<-lmm(
+  formula=
+    max_hr ~ 
+    timepoint+
+    interval+
+    sex+
+    timepoint:interval+
+    timepoint:treat:interval,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(max_hr_nointeract_lmm)
+plot(max_hr_nointeract_lmm, type = "scatterplot")
+plot(max_hr_nointeract_lmm, type = "scatterplot2")
+plot(max_hr_nointeract_lmm, type = "qqplot")
+plot(max_hr_nointeract_lmm, type = "correlation")
+plot.max_hr_obs_nointeract_lmm<-
+  plot(max_hr_nointeract_lmm,
+     color="treatment",
+     obs.alpha = 0.2,
+     at = data.frame(sex = "F"),
+     ci = F)
+plot(max_hr_nointeract_lmm,
+     color="treatment",
+     at = data.frame(sex = "F"),
+     ci.alpha = 0.1)
+
+export_plot.max_hr_obs_nointeract_lmm<-
+  plot.max_hr_obs_nointeract_lmm$plot+
+  labs(
+   y = "Maximal Heart Rate During 30 seconds of Interval",
+   x = "Timepoint & Interval",
+   color = "Treatment"
+  )+
+  ylim(90,200)+
+  theme_bw()
+
+export_plot.max_hr_obs_nointeract_lmm%>%
+  ggsave(
+    plot = .,
+    filename = here("output","acute bout", "graphics","plot.max_hr_obs_nointeract_lmm.jpg")
+  )
+
+
+
+max_hr_interact_lmm<-lmm(
+  formula=
+    max_hr ~ 
+    timepoint+
+    interval+
+    sex+
+    ifn_1_netto+
+    timepoint:interval+
+    timepoint:treat:interval+
+    timepoint:interval:ifn_1_netto+
+    timepoint:treat:interval:ifn_1_netto,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(max_hr_interact_lmm)
+plot(max_hr_interact_lmm, type = "scatterplot")
+plot(max_hr_interact_lmm, type = "scatterplot2")
+plot(max_hr_interact_lmm, type = "qqplot")
+plot(max_hr_interact_lmm, type = "correlation")
+plot(max_hr_interact_lmm,
+     color="treatment")
+
+  plot(max_hr_interact_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+anova(max_hr_interact_lmm)
+
+
+
+#time_zone5
+
+time_zone5_nointeract_lmm<-lmm(
+  formula=
+    timezone5 ~ 
+    timepoint+
+    interval+
+    sex+
+    timepoint:interval+
+    timepoint:treat:interval,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(time_zone5_nointeract_lmm)
+plot(time_zone5_nointeract_lmm, type = "scatterplot")
+plot(time_zone5_nointeract_lmm, type = "scatterplot2")
+plot(time_zone5_nointeract_lmm, type = "qqplot")
+plot(time_zone5_nointeract_lmm, type = "correlation")
+plot.time_zone5_obs_nointeract_lmm<-
+  plot(time_zone5_nointeract_lmm,
+     color="treatment",
+     obs.alpha = 0.2,
+     at = data.frame(sex = "F"),
+     ci = F)
+
+export_plot.time_zone5_obs_nointeract_lmm<-
+  plot.time_zone5_obs_nointeract_lmm$plot+
+  labs(
+   y = "Seconds in Timezone 5",
+   x = "Timepoint & Interval",
+   color = "Treatment"
+  )+
+  theme_bw()
+
+export_plot.time_zone5_obs_nointeract_lmm%>%
+  ggsave(
+    plot = .,
+    filename = here("output","acute bout", "graphics","plot.time_zone5_obs_nointeract_lmm.jpg")
+  )
+
+
+plot.time_zone5_nointeract_lmm<-
+  plot(time_zone5_nointeract_lmm,
+     color="treatment",
+     at = data.frame(sex = "F"),
+     ci.alpha = 0.1)
+plot.time_zone5_nointeract_lmm$plot%>%
+  ggsave(
+    filename = here("output","acute bout", "graphics","plot.time_zone5_nointeract_lmm.jpg"),
+    plot = .
+  )
+anova(time_zone5_nointeract_lmm)
+
+
+time_zone5_interact_lmm<-lmm(
+  formula=
+    timezone5 ~ 
+    timepoint+
+    interval+
+    sex+
+    ifn_1_netto+
+    timepoint:interval+
+    timepoint:treat:interval+
+    timepoint:interval:ifn_1_netto+
+    timepoint:treat:interval:ifn_1_netto,
+  repetition = ~timepoint_interval| id,
+  structure = "UN",
+  data = long_df_hr_change_group
+)
+
+summary(time_zone5_interact_lmm)
+plot(time_zone5_interact_lmm, type = "scatterplot")
+plot(time_zone5_interact_lmm, type = "scatterplot2")
+plot(time_zone5_interact_lmm, type = "qqplot")
+plot(time_zone5_interact_lmm, type = "correlation")
+plot(time_zone5_interact_lmm,
+     color="treatment")
+
+  plot(time_zone5_interact_lmm, 
+     type = "fit", 
+     color="treatment",
+     ci=F,
+     time.var = "timepoint",
+     obs.alpha = 0.5, 
+     facet = ~ cut_interval(ifn_1_netto, 3))
+
+anova(time_zone5_interact_lmm)
+```
+
+##### Check what we are exporting
+
+```{r}
+export_plot.slope_in_nointeract_lmm
+export_plot.slope_out_nointeract_lmm
+export_plot.max_hr_obs_nointeract_lmm
+export_plot.time_zone5_obs_nointeract_lmm
+```
+
+## Gam models
+
+I considered not doing this, but I think it adds a lot to the analysis, considering whether pulse changes during the bout is dependent on baseline IFN-1 is just a logical way to check whether individuals who have a different IFN-1 drive have different heart rate variations based on exercise.
+
+![](http://127.0.0.1:40349/chunk_output/s/A6397B00/c2f7xctscuxi7/000047.png)
+
+```{r eval = T}
+library(mgcv) 
+pulse_gam_main<-
+  mgcv::gam(
+  hr_bpm ~
+    timepoint+ 
+    treat:timepoint+
+    sex +
+    s(time_sec,  by = treat, k = 20)+
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_main)
+mgcv::vis.gam(pulse_gam_main,  view = c("treat","timepoint"))
+plot(pulse_gam_main)
+gam.check(pulse_gam_main)
+plot_puls_gam_main<-
+  pulse_gam_main%>%
+  plot_predictions( 
+                 condition = c("time_sec","treat","timepoint"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "Treatment",
+       fill = "Treatment",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_puls_gam_main
+
+perc_pulse_gam_main<-
+  mgcv::gam(
+  hr_percent_of_max ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_sec,  by = treat, k = 20)+
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(perc_pulse_gam_main)
+vis.gam(perc_pulse_gam_main)
+plot(perc_pulse_gam_main)
+gam.check(perc_pulse_gam_main)
+
+plot_perc_puls_gam_main<-
+  perc_pulse_gam_main%>%
+  plot_predictions( 
+                 condition = c("time_sec","treat","timepoint"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate Percentage of maximal heart rate",
+       x = "Time During Bout (second)",
+       color = "Treatment",
+       fill = "Treatment",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,120)+
+  theme_bw()
+
+plot_perc_puls_gam_main
+
+plot_puls_gam_main%>%
+  ggsave(
+    plot = .,
+    filename = here("Output", "Acute Bout", "Graphics", "plot_puls_gam_main.jpg")
+  )
+
+plot_perc_puls_gam_main%>%
+  ggsave(
+    plot = .,
+    filename = here("Output", "Acute Bout", "Graphics", "plot_perc_puls_gam_main.jpg")
+  )
+```
+
+### Interaction Models
+
+####30sec sum
+
+```{r}
+
+df_acute_bout_pulse_30_sec_average<-
+  df_acute_bout_pulse %>%
+  mutate(
+    time_round_to_30sec =
+      round(as.numeric(lubri_time)/30,0)*30
+  )%>%
+  group_by(id, timepoint, time_round_to_30sec)%>%
+  summarise(
+    hr = round(mean(hr_bpm, na.rm = T),0),
+    ifn_1_netto = ifn_1_netto[1],
+    treat = treat[1],
+    sex = sex[1],
+  )%>%
+  mutate(
+    id = factor(id),
+    timepoint = factor(timepoint),
+    treat = factor(treat),
+    sex = factor(sex)
+  )
+
+
+pulse_gam_interact<-
+  mgcv::gam(
+  hr ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_round_to_30sec, by = treat, k=15)+
+    s(ifn_1_netto, by=treat, k =5)+
+    s(time_round_to_30sec, ifn_1_netto, by=treat, k =5)+ 
+    s(id, bs = "re"),
+  data = df_acute_bout_pulse_30_sec_average,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_interact)
+plot(pulse_gam_interact)
+vis.gam(pulse_gam_interact, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact)
+
+
+plot_puls_gam_interact<-
+  pulse_gam_interact%>%
+  plot_predictions( 
+                 condition = c("time_round_to_30sec","ifn_1_netto","timepoint","treat"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_puls_gam_interact
+
+plot_puls_gam_interact_no_timeortreat<-
+  pulse_gam_interact%>%
+  plot_predictions( 
+                 condition = c("time_round_to_30sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_puls_gam_interact_no_timeortreat
+
+plot_puls_gam_interact%>%
+  ggsave(
+    plot = .,
+    filename = here("Output","Acute Bout", "Graphics", "Plot_Puls_gam_interact_30secsum_Facet.jpg")
+  )
+
+plot_puls_gam_interact_no_timeortreat%>%
+  ggsave(
+    plot = .,
+    filename = here("Output","Acute Bout", "Graphics", "Plot_Puls_gam_30secsum_interact.jpg")
+  )
+
+
+pulse_gam_interact_reduced<-
+  mgcv::gam(
+  hr ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_round_to_30sec, by = treat, k=15)+
+    s(ifn_1_netto, by=treat, k =5)+ 
+    s(id, bs = "re"),
+  data = df_acute_bout_pulse_30_sec_average,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_interact_reduced)
+plot(pulse_gam_interact_reduced)
+vis.gam(pulse_gam_interact_reduced, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact_reduced)
+
+AIC(
+  pulse_gam_interact,
+  pulse_gam_interact_reduced
+)
+
+```
+
+```{r}
+
+
+pulse_gam_interact_no_ifn_base_smooth<-
+  mgcv::gam(
+  hr ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_round_to_30sec, by = treat, k=15)+
+    s(time_round_to_30sec, ifn_1_netto, by=treat, k =5)+ 
+    s(id, bs = "re"),
+  data = df_acute_bout_pulse_30_sec_average,
+  family = Gamma(link = "log")
+)
+
+summary(pulse_gam_interact_no_ifn_base_smooth)
+gam.check(pulse_gam_interact_no_ifn_base_smooth)
+
+AIC(pulse_gam_interact_no_ifn_base_smooth, pulse_gam_interact )
+```
+
+### FULL DATA INTERACTION MODELS
+
+```{r eval = F}
+pulse_gam_interact_fulltime<-
+  mgcv::gam(
+  hr_bpm ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_sec, by = treat, k=15)+
+    s(ifn_1_netto, by=treat, k =5)+ 
+    s(ifn_1_netto, time_sec, by=treat, k =5)+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_interact_fulltime)
+plot(pulse_gam_interact_fulltime)
+vis.gam(pulse_gam_interact_fulltime, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact_fulltime)
+
+
+plot_puls_gam_interact_fulltime<-
+  pulse_gam_interact_fulltime%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto","treat","timepoint"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_puls_gam_interact_fulltime
+
+plot_puls_gam_interact_fulltime_nofacet<-
+  pulse_gam_interact_fulltime%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (bpm)",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_puls_gam_interact_fulltime_nofacet
+
+
+pulse_gam_interact_fulltime_reduced<-
+  mgcv::gam(
+  hr_bpm ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_sec, by = treat, k=15)+
+    s(ifn_1_netto, by=treat, k =5)+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_interact_fulltime_reduced)
+plot(pulse_gam_interact_fulltime_reduced)
+vis.gam(pulse_gam_interact_fulltime_reduced, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact_fulltime_reduced)
+
+AIC(pulse_gam_interact_fulltime,pulse_gam_interact_fulltime_reduced)
+
+plot_pulse_gam_interact_fulltime_reduced_nofacet<-
+  pulse_gam_interact_fulltime_reduced%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_pulse_gam_interact_fulltime_reduced_nofacet
+plot_puls_gam_interact_fulltime_nofacet
+
+perc_pulse_gam_interact<-
+  mgcv::gam(
+  hr_percent_of_max ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_sec, by = treat, k=15)+
+    s(ifn_1_netto, by=treat, k =5)+ 
+    s(ifn_1_netto, time_sec, by=treat, k =10)+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(perc_pulse_gam_interact)
+plot(perc_pulse_gam_interact)
+vis.gam(perc_pulse_gam_interact)
+gam.check(perc_pulse_gam_interact)
+
+AIC(pulse_gam_main,perc_pulse_gam_main,pulse_gam_interact,pulse_gam_interact_full,perc_pulse_gam_interact)
+
+plot_perc_puls_gam_interact<-
+  perc_pulse_gam_interact%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto","treat","timepoint"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate % of maximal",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,130)+
+  theme_bw()
+
+
+plot_perc_puls_gam_interact_nofacet<-
+  perc_pulse_gam_interact%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate % of Maximal",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,130)+
+  theme_bw()
+
+plot_perc_puls_gam_interact
+plot_perc_puls_gam_interact_nofacet
+
+plot_puls_gam_interact_full%>%
+  ggsave(
+    plot = .,
+    filename = here("Output", "Acute Bout", "Graphics", "plot_puls_gam_interact_full.jpg")
+  )
+plot_perc_puls_gam_interact%>%
+  ggsave(
+    plot = .,
+    filename = here("Output", "Acute Bout", "Graphics", "plot_perc_puls_gam_interact.jpg")
+  )
+
+plot_puls_gam_interact_fulltime_nofacet%>%
+  ggsave(
+    plot = .,
+    filename = here("Output", "Acute Bout", "Graphics", "plot_puls_gam_interact_fulltime_nofacet.jpg")
+  )
+plot_perc_puls_gam_interact_nofacet%>%
+  ggsave(
+    plot = .,
+    filename = here("Output", "Acute Bout", "Graphics", "plot_perc_puls_gam_interact_full_nofacet.jpg")
+  )
+#perc_pulse_gam_interact_double<-
+ # mgcv::gam(
+#  hr_percent_of_max ~
+##    timepoint + 
+#    treat:timepoint+
+#    ifn_1_netto+
+#    timepoint:ifn_1_netto+
+##    timepoint:ifn_1_netto:treat+
+#    sex+
+#    s(time_sec, bs = "cs", k=100)+ 
+#    s(time_sec,ifn_1_netto, bs = "tp")+ 
+#    s(id_fix, bs = "re"),
+#  data = df_acute_bout_pulse
+#)
+#summary(perc_pulse_gam_interact_double)
+#plot(perc_pulse_gam_interact_double)
+##vis.gam(perc_pulse_gam_interact_double)
+#gam.check(perc_pulse_gam_interact_double)
+###
+
+#pulse_gamm<-
+ # mgcv::gamm(
+  #hr_bpm ~ 
+   # timepoint+
+    #treat:timepoint+
+    #s(time_sec, bs = "cs"),
+  #random = list(id_fix=~1),
+#  data = df_acute_bout_pulse
+#)
+ # summary(pulse_gamm$gam)
+  #summary(pulse_gamm$lme)
+
+#pulse_interact_gamm<-
+ # mgcv::gamm(
+  #hr_bpm ~ 
+   # timepoint + 
+    #treat:timepoint+
+    #timepoint:ifn_1_netto+
+    #timepoint:ifn_1_netto:treat+
+    #sex+
+    #s(time_sec, bs = "cs"),
+  #random = list(id_fix = ~1),
+  #data = df_acute_bout_pulse
+#)
+ # summary(pulse_interact_gamm$gam)
+```
+
+#### Correct for Age
+
+```{r eval = F}
+#Dont Evaluate this unless you have full access
+warning("#Dont Evaluate this unless you have full access and are on a local machine with access to the L-drive")
+fullaccess=T
+if(fullaccess){suppressWarnings(
+age_df <- read_excel(
+  path="L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/Samlet Data v.5.xlsx")%>%
+  filter(
+    task_name=="Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion") %>%
+  dplyr::select(
+    allocation_no, birthday,`[dato_vo2max]`)%>%
+  mutate(
+    id = to_snake_case(allocation_no),
+    age = lubridate::year(lubridate::as.period(lubridate::interval(birthday,`[dato_vo2max]`))),
+    .keep = "unused")%>%filter(!is.na(age)))
+    #FYI this line will not run on external devices, and should be blanked out.
+
+df_acute_bout_pulse<-
+  left_join(
+  df_acute_bout_pulse, age_df
+)
+
+
+pulse_gam_interact_full_agecorrect<-
+  mgcv::gam(
+  hr_bpm ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(time_sec, by = treat, k=40)+
+    s(ifn_1_netto, by=treat, k =10)+ 
+    s(age, k=10)+
+    s(ifn_1_netto, time_sec, by=treat, k =25)+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_interact_full_agecorrect)
+plot(pulse_gam_interact_full_agecorrect)
+vis.gam(pulse_gam_interact_full_agecorrect, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact_full_agecorrect)
+
+#saveRDS(
+#  object = pulse_gam_interact_full_agecorrect,
+#  file = here("Output","Acute Bout", "RDS_models", "pulse_gam_interact_full_agecorrect.rds")
+#) ## If the above is taking too long to load, you can try loading this model instead.
+
+plot_pulse_gam_interact_full_agecorrect<-
+  pulse_gam_interact_full_agecorrect%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto","treat","timepoint"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Effect of IFN-1 score across time during the acute bout. Faceted for Treatment and timepoint",
+       subtitle = "Averaged across age")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_pulse_gam_interact_full_agecorrect
+plot_pulse_gam_interact_full_agecorrect%>%
+  ggsave(
+  plot = .,
+  filename = here("output","Acute Bout", "graphics", "plot_pulse_gam_interact_full_agecorrect.jpg")
+)
+
+plot_pulse_gam_interact_full_agecorrect_no_facet<-
+  pulse_gam_interact_full_agecorrect%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of IFN-1 score during bout",
+       subtitle = "Averaged across treatment, time and age.")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_gam_interact_full_agecorrect_no_facet
+
+
+plot_pulse_gam_interact_full_agecorrect_no_facet%>%
+  ggsave(
+  plot = .,
+  filename = here("output","Acute Bout", "graphics", "plot_pulse_gam_interact_full_agecorrect_nofacet.jpg")
+)
+
+plot_pulse_gam_interact_full_agecorrect_age_effect<-
+  pulse_gam_interact_full_agecorrect%>%
+  plot_predictions( 
+                 condition = c("time_sec","age"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+
+plot_pulse_gam_interact_full_agecorrect_age_effect
+plot_pulse_gam_interact_full_agecorrect_age_effect%>%
+  ggsave(
+  plot = .,
+  filename = here("output","Acute Bout", "graphics", "plot_pulse_gam_interact_full_agecorrect_age_effect.jpg")
+)
+
+pulse_gam_interact_reduced_agecorrect<-
+  mgcv::gam(
+  hr_bpm ~
+    sex+
+    timepoint+
+    treat:timepoint+
+    s(age, k=5)+
+    s(ifn_1_netto, time_sec, by=treat, k =8)+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse,
+  family = Gamma(link = "log")
+)
+summary(pulse_gam_interact_reduced_agecorrect)
+plot(pulse_gam_interact_reduced_agecorrect)
+#vis.gam(pulse_gam_interact_reduced_agecorrect, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact_reduced_agecorrect)
+
+plot_pulse_gam_interact_reduced_agecorrect<-
+  pulse_gam_interact_reduced_agecorrect%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of IFN-1 score during bout",
+       subtitle = "Averaged across treatment, time and age.")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_gam_interact_reduced_agecorrect
+
+plot_pulse_gam_interact_reduced_agecorrect%>%
+  ggsave(
+  plot = .,
+  filename = here("output","Acute Bout", "graphics", "plot_pulse_gam_interact_reduced_agecorrect.jpg")
+)
+}
+
+```
+
+# The End
+
+## Gam models on the effect of Pulse by Watt
+
+```{r eval =F}
+
+
+pulse_watt_gam<-
+  mgcv::gam(
+  hr_bpm ~
+    timepoint + 
+    sex+
+    s(time_sec, by = treat, k =30)+ 
+    s(time_sec, watt, by = treat, k =15)+
+    s(id_fix, bs = "re") ,
+  family = Gamma(link="log"),
+  data = df_acute_bout_pulse
+)
+summary(pulse_watt_gam)
+plot(pulse_watt_gam)
+vis.gam(pulse_watt_gam, view = c("time_sec", "watt"))
+gam.check(pulse_watt_gam)
+
+
+plot_pulse_watt_gam<-
+  pulse_watt_gam%>%
+  plot_predictions( 
+                 condition = c("time_sec","watt"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (BPM)",
+       x = "Time During Bout (second)",
+       color = "Resistance (Watt)",
+       fill = "Resistance (Watt)",
+       title = "Average smooth effect of resistance")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_watt_gam
+
+plot_pulse_watt_gam %>%
+  ggsave(
+  plot = .,
+  filename = here( "Output","Acute Bout","Graphics","Plot_Pulse_Watt_gam.jpg")
+)
+
+plot_watt_gam<-
+  pulse_watt_gam%>%
+  plot_predictions( 
+                 condition = c("watt"),
+                 conf_level = 0.95,
+                 point = 0.01,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (BPM)",
+       x = "Resistance (Watt)",
+       color = "Resistance (Watt)",
+       fill = "Resistance (Watt)",
+       title = "Average smooth effect of treatment & time during bout")+
+  ylim(0,200)+
+  theme_bw()
+plot_watt_gam
+
+plot_watt_gam %>%
+  ggsave(
+  plot = .,
+  filename = here( "Output","Acute Bout","Graphics","Plot_Watt_gam.jpg")
+)
+
+pulse_time_watt_IFN_gam<-
+  mgcv::gam(
+  hr_bpm ~
+    timepoint + 
+    treat:timepoint+
+    sex+
+    s(time_sec, k =50)+ 
+    s(time_sec, watt, by =treat, k =40)+ 
+    s(time_sec, ifn_1_netto, by = treat, k=20)+ 
+    s(time_sec, watt, ifn_1_netto, by = treat, k =20)+ 
+    s(id_fix, bs = "re") ,
+  family = Gamma(link="log"),
+  data = df_acute_bout_pulse
+)
+saveRDS(pulse_time_watt_IFN_gam,
+        file = here("output","acute bout", "RDS_Models","Pulse_Time_Wat_IFN_gam.RDS"))
+summary(pulse_time_watt_IFN_gam)
+plot(pulse_time_watt_IFN_gam)
+
+plot_pulse_time_watt_IFN_gam<-
+  pulse_time_watt_IFN_gam%>%
+  plot_predictions( 
+                 condition = c("time_sec","watt"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (BPM)",
+       x = "Time During Bout (second)",
+       color = "Resistance (Watt)",
+       fill = "Resistance (Watt)",
+       title = "Average smooth effect of resistance")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_time_watt_IFN_gam
+
+plot_pulse_time_IFN_Wattcorrect_gam<-
+  pulse_time_watt_IFN_gam%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (BPM)",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "Resistance (Watt)",
+       title = "Average smooth effect of resistance")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_time_IFN_Wattcorrect_gam
+
+
+
+plot_pulse_time_IFN_Wattcorrect_gam<-
+  pulse_time_watt_IFN_gam%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (BPM)",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of time and IFN_signature, averaged across Resistance")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_time_IFN_Wattcorrect_gam
+
+
+plot_pulse_time_IFN_Wattcorrect_gam%>%
+  ggsave(
+    plot = .,
+    filename = here("Output","Acute Bout","Graphics","plot_pulse_time_IFN_Wattcorrect_gam.jpg")
+  )
+
+plot_pulse_time_IFN_Wattcorrect_treateffect_gam<-
+  pulse_time_watt_IFN_gam%>%
+  plot_predictions( 
+                 condition = c("time_sec","ifn_1_netto","treat"),
+                 conf_level = 0.95,
+                 type = 'response', rug = T) +
+  labs(y =  "Heart Rate (BPM)",
+       x = "Time During Bout (second)",
+       color = "IFN-1 Score",
+       fill = "IFN-1 Score",
+       title = "Average smooth effect of time and IFN_signature, averaged across Resistance")+
+  ylim(0,200)+
+  theme_bw()
+plot_pulse_time_IFN_Wattcorrect_treateffect_gam
+
+
+plot_pulse_time_IFN_Wattcorrect_treateffect_gam%>%
+  ggsave(
+    plot = .,
+    filename = here("Output","Acute Bout","Graphics","plot_pulse_time_IFN_Wattcorrect_treateffect_gam.jpg")
+  )
+```
+
+## More complicated models
+
+```{r eval =F}
+
+df_acute_bout_pulse<-
+  df_acute_bout_pulse%>%
+  mutate(
+    id_fix = factor(id),
+    time_sec = period_to_seconds(lubri_time)
+  )
+pulse_gam_main<-
+  mgcv::gam(
+  hr_bpm ~
+    timepoint + 
+    treat:timepoint+
+    sex+
+    s(time_sec, bs = "cs") + 
+    s(id_fix, bs = "re") ,
+  data = df_acute_bout_pulse
+)
+summary(pulse_gam_main)
+vis.gam(pulse_gam_main)
+plot(pulse_gam_main)
+gam.check(pulse_gam_main)
+plot_predictions(pulse_gam_main, condition = 'treat',
+                 type = 'link') +
+  labs(y = "Linear predictor (link scale)",
+       title = "Average smooth effect of concentration",
+       subtitle = "Aggregated across treatments and types")
+
+
+perc_pulse_gam_main<-
+  mgcv::gam(
+  hr_percent_of_max ~
+    timepoint + 
+    treat:timepoint+
+    sex+
+    s(time_sec, bs = "cs")+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse
+)
+summary(perc_pulse_gam_main)
+vis.gam(perc_pulse_gam_main)
+plot(perc_pulse_gam_main)
+gam.check(perc_pulse_gam_main)
+
+
+###
+
+pulse_gam_interact<-
+  mgcv::gam(
+  hr_bpm ~
+    timepoint + 
+    treat:timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    timepoint:ifn_1_netto:treat+
+    sex+
+    s(time_sec, bs = "cs")+ 
+    s(id_fix, bs = "re") ,
+  data = df_acute_bout_pulse
+)
+summary(pulse_gam_interact)
+plot(pulse_gam_interact)
+vis.gam(pulse_gam_interact, view = c("timepoint","ifn_1_netto"))
+gam.check(pulse_gam_interact)
+
+perc_pulse_gam_interact<-
+  mgcv::gam(
+  hr_percent_of_max ~
+    timepoint + 
+    treat:timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    timepoint:ifn_1_netto:treat+
+    sex+
+    s(time_sec, bs = "cs", k =100)+ 
+    s(id_fix, bs = "re") ,
+  data = df_acute_bout_pulse
+)
+summary(perc_pulse_gam_interact)
+plot(perc_pulse_gam_interact)
+vis.gam(perc_pulse_gam_interact)
+gam.check(perc_pulse_gam_interact)
+
+perc_pulse_gam_interact_double<-
+  mgcv::gam(
+  hr_percent_of_max ~
+    timepoint + 
+    treat:timepoint+
+    ifn_1_netto+
+    timepoint:ifn_1_netto+
+    timepoint:ifn_1_netto:treat+
+    sex+
+    s(time_sec, bs = "cs", k=100)+ 
+    s(time_sec,ifn_1_netto, bs = "tp")+ 
+    s(id_fix, bs = "re"),
+  data = df_acute_bout_pulse
+)
+summary(perc_pulse_gam_interact_double)
+plot(perc_pulse_gam_interact_double)
+vis.gam(perc_pulse_gam_interact_double)
+gam.check(perc_pulse_gam_interact_double)
+###
+
+#pulse_gamm<-
+ # mgcv::gamm(
+  #hr_bpm ~ 
+   # timepoint+
+    #treat:timepoint+
+    #s(time_sec, bs = "cs"),
+  #random = list(id_fix=~1),
+#  data = df_acute_bout_pulse
+#)
+ # summary(pulse_gamm$gam)
+  #summary(pulse_gamm$lme)
+
+#pulse_interact_gamm<-
+ # mgcv::gamm(
+  #hr_bpm ~ 
+   # timepoint + 
+    #treat:timepoint+
+    #timepoint:ifn_1_netto+
+    #timepoint:ifn_1_netto:treat+
+    #sex+
+    #s(time_sec, bs = "cs"),
+  #random = list(id_fix = ~1),
+  #data = df_acute_bout_pulse
+#)
+ # summary(pulse_interact_gamm$gam)
+
+
+```
+
+#The End
+
+```{r}
+print("this is the end of acute_bout_pulse_data_wrangling.qmd")
+beepr::beep(sound = "complete")
+```
