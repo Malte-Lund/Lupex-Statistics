@@ -95,7 +95,7 @@ cytokine.data<-
 )
 ```
 
-## Main Model of M.1.2. change due to intervention
+## Main Model of ifn_1 change due to intervention
 
 ```{r}
 

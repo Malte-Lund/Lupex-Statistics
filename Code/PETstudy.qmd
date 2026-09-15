@@ -1,0 +1,2406 @@
+---
+title: "PETStudy"
+format: html
+editor: visual
+---
+
+## PET-STUDY
+
+This this the study were we focus on the 82-Rb-Rest/Stress PET-CTs and the other pulmonary outcomes.
+
+```{r}
+library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(tidyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+#renv::install("table1")
+library(table1)
+#renv::install("flextable")
+#renv::install("officer")
+library(flextable)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+#renv::install("DescTools")
+library(DescTools)
+library(lubridate)
+
+library(officer)
+
+#set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
+here::i_am("Code/PETStudy.qmd")
+```
+
+So here's the outline of the plan: We'll load the Pet-CT data, the pulmonary tests and the table 1 data we already have, we'll then check whether it'll be easier to implement the table 1 data into the workflow in the datawrangling.qmd or whether we'll just do it here.
+
+Then first the descriptive statistics, then the raw change scores, then we'll do the models on outcomes, and add that together to form table 2 and 3. Then we'll do figures and voila we have our project done.
+
+## Load data
+
+```{r}
+pet_data <-
+  read_excel(here("Data","PET-CT","PBV_LUPEX.xlsx"))%>%
+  mutate(
+    id = to_snake_case(ID),
+    timepoint = Timepoint,
+  )%>%
+  relocate(
+    id, timepoint
+  )
+
+lfu_data<-
+  read_excel(here("Data/easy_trial_seperate_schemes/_d_visit__lfu.data .xlsx"))%>%
+  mutate(
+    Timepoint = 
+      case_when(
+        grepl(
+          "aseline", task_name
+        ) ~ "Baseline",
+        grepl(
+          "ollow", task_name
+        ) ~ "Followup",
+        T~NA_character_
+      )
+  ) %>% mutate(fev_1_fvc_rå = round(100*fev_1 / fvc_rå,2)) #Recalculate ratio in case someone put it in incorrectly as for LUP007 followup.
+
+vO2_data<-
+  read_excel(path = here("Output","VO2maxQC","Data.VO2MAXQC.xlsx"))%>%
+  mutate(
+    Timepoint = factor(
+      timepoint, levels = c("screening", "baseline", "followup"), labels = c("Screening", "Baseline", "Followup")))%>%
+  dplyr::select(
+        id, Timepoint, aerobiccapacity, 
+        borg, HRmax, maxRQ, 
+        vslope_vent_threshold, O2_vent_thresh, CO2_vent_tresh
+      )
+
+other_data <- 
+  read_excel(here("data","data.table1.xlsx"))%>%
+  dplyr::select(id, 
+                timepoint,
+                age,
+                pack_years, smoking_status, waist_height_ratio,
+                sle_start_dato,  SLEDAI_score, slicc_score,
+                FSS, aerobic_capacity, vo_2_max, duration_daily_MVPA_pla,
+                Energy_kJ_mean, total_fat_percentage)%>%
+  mutate(
+    Timepoint = factor(
+      timepoint, levels = c("screening", "baseline", "followup"), labels = c("Screening", "Baseline", "Followup"))
+  )%>%
+  group_by(id)%>%
+  mutate(pack_years =
+           case_when(
+             smoking_status == "Never Smoker" ~ 0,
+             T ~ pack_years
+           ))%>%
+  fill(age,
+       pack_years,
+       smoking_status,
+       waist_height_ratio,
+       age,
+       sle_start_dato,
+       .direction = "updown")
+
+pet_lung_data<-
+ vO2_data%>%
+  left_join(pet_data, join_by(id, Timepoint))%>%
+  left_join(other_data, join_by(id, Timepoint))%>%
+  left_join(lfu_data, join_by(id, Timepoint))%>%
+  mutate(
+    Timepoint = factor(Timepoint, levels = c("Screening","Baseline","Followup")),
+    sex = factor(sex, labels = c("Female","Male"), levels = c("F","M")),
+    SLE_duration_months = as.numeric(task_start - sle_start_dato) / 30.44,
+    HR_R_LM=`HR_R_(LM)`,
+    HR_S_LM=`HR_S_(LM)`,
+    S_R_ratio_PBV = `S/R ratio PBV`
+  )%>%
+  group_by(id)%>%
+  fill(sex, .direction = "up")%>%
+  relocate(
+    id, Timepoint, sex
+  )%>%
+  dplyr::select(!(
+    participant_id: schema_version_id
+  )
+  ) 
+```
+
+## Table 1
+
+using table1 package, we'll import some stuff from tablesRus.qmd and make it here 
+### Data Set
+
+```{r}
+#list_normal_dist <- list()
+
+#rndr <- function(x, name, ...) {
+#    if (!is.numeric(x)) return(render.categorical.default(x))
+#  what <-
+#    case_when(
+#   name %in% list_normal_dist ~ c(.="N", .="Mean (SD)", .="NMISS"),
+#   T ~ c(.="N",  .="Median [Q1, Q3]", .="NMISS"))
+#    parse.abbrev.render.code(c(what))(x)
+#}
+
+pet_lung_table_1.data <-
+  pet_lung_data %>%
+  dplyr::filter(Timepoint == "Baseline")%>%
+  dplyr::filter(
+    !is.na(Scanningsdato)
+  )%>%mutate(
+    treatment = str_to_title(treatment)
+  )
+```
+
+### Labels and Units
+
+```{r}
+label(pet_lung_table_1.data$sex) <- "Sex"
+label(pet_lung_table_1.data$age) <- "Age"
+label(pet_lung_table_1.data$Weight) <- "Weight"
+label(pet_lung_table_1.data$Height) <- "Height"
+label(pet_lung_table_1.data$BMI) <- "BMI"
+label(pet_lung_table_1.data$borg) <- "RPE"
+label(pet_lung_table_1.data$Body_Surface_DuBois) <- "Body Surface (DuBois)"
+label(pet_lung_table_1.data$smoking_status) <- "Smoking Status"
+label(pet_lung_table_1.data$pack_years) <- "Pack Years"
+label(pet_lung_table_1.data$fev_1) <- "FEV 1"
+label(pet_lung_table_1.data$fev_1_pred) <- "FEV 1 percent of predicted"
+label(pet_lung_table_1.data$fvc_rå) <- "FVC"
+label(pet_lung_table_1.data$fvc_pred) <- "FVC percent of predicted"
+label(pet_lung_table_1.data$fev_1_fvc_rå) <- "FEV 1 / FVC ratio"
+label(pet_lung_table_1.data$fev_fvc_pred) <- "FEV 1 / FVC ratio percent of predicted"
+label(pet_lung_table_1.data$tlv_rå) <- "TLV"
+label(pet_lung_table_1.data$tlv_pred) <- "TLV percent of predicted"
+label(pet_lung_table_1.data$rv_rå) <- "RV"
+label(pet_lung_table_1.data$rv_pred) <- "RV percent of predicted"
+label(pet_lung_table_1.data$dlc_oc_rå) <- "DLCO"
+label(pet_lung_table_1.data$dlc_oc_pred) <- "DLCO percent of predicted"
+label(pet_lung_table_1.data$va_rå) <- "VA"
+label(pet_lung_table_1.data$va_pred) <- "VA percent of predicted"
+label(pet_lung_table_1.data$kco_rå) <- "KCO"
+label(pet_lung_table_1.data$kco_pred) <- "KCO percent of predicted"
+label(pet_lung_table_1.data$HR_R_LM) <- "82Rb PET-CT - Heart Rate - Rest"
+label(pet_lung_table_1.data$HR_S_LM) <- "82Rb PET-CT - Heart Rate - Stress"
+label(pet_lung_table_1.data$MTT_Rest) <- "MTT Rest"
+label(pet_lung_table_1.data$MTT_Stress) <- "MTT Stress"
+label(pet_lung_table_1.data$EDV_R) <- "EDV - Rest"
+label(pet_lung_table_1.data$ESV_R) <- "ESV - Rest"
+label(pet_lung_table_1.data$SV_R) <- "Stroke Volume - Rest"
+label(pet_lung_table_1.data$LVEF_R) <- "LVEF - Rest"
+label(pet_lung_table_1.data$EDV_S) <- "EDV - Stress"
+label(pet_lung_table_1.data$ESV_S) <- "ESV - Stress"
+label(pet_lung_table_1.data$SV_S) <- "Stroke Volume - Stress"
+label(pet_lung_table_1.data$LVEF_S) <- "LVEF - Stress"
+label(pet_lung_table_1.data$LVEF_Reser) <- "LVEF - Reserve"
+label(pet_lung_table_1.data$PBV_R) <- "PBV - Rest"
+label(pet_lung_table_1.data$PBS_S) <- "PBV - Stress"
+label(pet_lung_table_1.data$S_R_ratio_PBV) <- "PBV - Stress / Rest Ratio"
+label(pet_lung_table_1.data$SLE_duration_months) <- "SLE Duration"
+label(pet_lung_table_1.data$SLEDAI_score) <- "SLEDAI"
+label(pet_lung_table_1.data$slicc_score) <- "SLICC"
+label(pet_lung_table_1.data$FSS) <- "FSS"
+label(pet_lung_table_1.data$aerobic_capacity) <- "Aerobic Capacity"
+label(pet_lung_table_1.data$vo_2_max) <- "VO2max"
+label(pet_lung_table_1.data$O2_vent_thresh) <- "O2 Ventilatory Threshold"
+label(pet_lung_table_1.data$CO2_vent_tresh) <- "CO2 Ventilatory Threshold"
+label(pet_lung_table_1.data$vslope_vent_threshold) <- 
+  "Ventilatory Threshold percentage of VO2max"
+label(pet_lung_table_1.data$duration_daily_MVPA_pla)<- "Daily MVPA"
+label(pet_lung_table_1.data$Energy_kJ_mean) <- "Daily KJ intake"
+label(pet_lung_table_1.data$all_ifn_netto_t_test) <- "All IFN Score"
+label(pet_lung_table_1.data$ifn_1_netto) <- "IFN-1 score"
+
+
+units(pet_lung_table_1.data$Weight) <- "Kg"
+units(pet_lung_table_1.data$Height) <- "cm"
+units(pet_lung_table_1.data$BMI) <- "Kg/m^2"
+units(pet_lung_table_1.data$borg) <- "borg"
+units(pet_lung_table_1.data$Body_Surface_DuBois) <- "m^2"
+units(pet_lung_table_1.data$pack_years) <- "Years"
+units(pet_lung_table_1.data$fev_1) <- "L"
+units(pet_lung_table_1.data$fev_1_pred) <- "%"
+units(pet_lung_table_1.data$fvc_rå) <- "L"
+units(pet_lung_table_1.data$fvc_pred) <- "%"
+units(pet_lung_table_1.data$fev_1_fvc_rå) <- "%"
+units(pet_lung_table_1.data$fev_fvc_pred) <- "%"
+units(pet_lung_table_1.data$tlv_rå) <- "L"
+units(pet_lung_table_1.data$tlv_pred) <- "%"
+units(pet_lung_table_1.data$rv_rå) <- "L"
+units(pet_lung_table_1.data$rv_pred) <- "%"
+units(pet_lung_table_1.data$dlc_oc_rå) <- "ml/min/kPa"
+units(pet_lung_table_1.data$dlc_oc_pred) <- "%"
+units(pet_lung_table_1.data$va_rå) <- "L/min"
+units(pet_lung_table_1.data$va_pred) <- "%"
+units(pet_lung_table_1.data$kco_rå) <- "mmol/min/kPa/L"
+units(pet_lung_table_1.data$kco_pred) <- "%"
+units(pet_lung_table_1.data$HR_R_LM) <- "bpm"
+units(pet_lung_table_1.data$HR_S_LM) <- "bpm"
+units(pet_lung_table_1.data$MTT_Rest) <- "s"
+units(pet_lung_table_1.data$MTT_Stress) <- "s"
+units(pet_lung_table_1.data$EDV_R) <- "ml"
+units(pet_lung_table_1.data$ESV_R) <- "ml"
+units(pet_lung_table_1.data$SV_R) <- "ml"
+units(pet_lung_table_1.data$LVEF_R) <- "%"
+units(pet_lung_table_1.data$EDV_S) <- "ml"
+units(pet_lung_table_1.data$ESV_S) <- "ml"
+units(pet_lung_table_1.data$SV_S) <- "ml"
+units(pet_lung_table_1.data$LVEF_S) <- "%"
+units(pet_lung_table_1.data$LVEF_Reser) <- "%"
+units(pet_lung_table_1.data$PBV_R) <- "ml"
+units(pet_lung_table_1.data$PBS_S) <- "ml"
+#units(pet_lung_table_1.data$S_R_ratio_PBV) <- "PBV - Stress / Rest Ratio"
+units(pet_lung_table_1.data$SLE_duration_months) <- "Months"
+#units(pet_lung_table_1.data$SLEDAI_score) <- "SLEDAI"
+#units(pet_lung_table_1.data$slicc_score) <- "SLICC"
+#units(pet_lung_table_1.data$FSS) <- "FSS"
+units(pet_lung_table_1.data$aerobic_capacity) <- "ml/min/kg"
+units(pet_lung_table_1.data$vo_2_max) <- "ml/min"
+units(pet_lung_table_1.data$O2_vent_thresh) <- "ml/min"
+units(pet_lung_table_1.data$CO2_vent_tresh) <- "ml/min"
+units(pet_lung_table_1.data$vslope_vent_threshold) <- "%"
+units(pet_lung_table_1.data$duration_daily_MVPA_pla)<- "Minutes"
+units(pet_lung_table_1.data$Energy_kJ_mean) <- "KJ"
+units(pet_lung_table_1.data$all_ifn_netto_t_test) <- "Z-score"
+units(pet_lung_table_1.data$ifn_1_netto) <- "Z-score"
+```
+
+### Normal distributions,
+
+The Render function prefers to know whether we have a normal distribution or not, so lets take a look at histograms and consider based on this.
+
+```{r}
+check_dist <- list(
+  "age",              "Weight",
+              "Height",
+              "BMI",
+              "borg",
+              "Body_Surface_DuBois",
+              #"smoking_status",
+              "pack_years",
+              "fev_1",
+              "fev_1_pred",
+              "fev_1_fvc_rå",
+              "fev_fvc_pred",
+              "tlv_rå",
+              "tlv_pred",
+              "rv_rå",
+              "rv_pred",
+              "dlc_oc_rå",
+              "dlc_oc_pred",
+              "va_rå",
+              "va_pred",
+              "kco_rå",
+              "kco_pred",
+              "HR_R_(LM)",
+              "HR_S_(LM)",
+              "MTT_Rest",
+              "MTT_Stress",
+              "EDV_R","ESV_R","SV_R","LVEF_R",
+              "EDV_S","ESV_S","SV_S","LVEF_S",
+              "LVEF_Reser",
+              "PBV_R","PBS_S",
+              "S/R ratio PBV",     
+           #TODO Add lung parameters and PET parameters
+              #weekly_exercise_sessions_baseline +
+              #exercise_intensity_baseline +
+              #exercise_duration_baseline +
+              "SLE_duration_months",
+              "SLEDAI_score",
+              "slicc_score",
+              "FSS",
+              "aerobic_capacity",
+              "vo_2_max",
+              "O2_vent_thresh",
+              "CO2_vent_tresh",
+              "vslope_vent_threshold",
+              "duration_daily_MVPA_pla",
+              "Energy_kJ_mean",
+              "total_fat_percentage",
+              
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+              #hemoglobin+
+              #thrombocytes+
+              #beta2_microglobuline+
+              "all_ifn_netto_t_test",
+              "ifn_1_netto")
+
+histograms<-list()    
+for(var in check_dist){
+  histograms[var]<-pet_lung_table_1.data%>%
+  ggplot(
+  aes(x = .data[[as.character(var)]]))+
+  geom_histogram()
+  
+  
+  
+} 
+histograms
+
+```
+
+####Assign Normal Distributions From the histograms we assign outcomes that follow a normal distribution, and those that do not
+
+```{r}
+
+
+norm_dist <- list(
+  "age","Weight",
+              "Height",
+              "BMI",
+              "borg",
+              "Body_Surface_DuBois",
+              #"smoking_status",
+              #"pack_years",
+              "fev_1",
+              "fev_1_pred",
+              "fev_1_fvc_rå",
+              "fev_fvc_pred",
+              #"tlv_rå",
+              "tlv_pred",
+              "rv_rå",
+              "rv_pred",
+              "dlc_oc_rå",
+              "dlc_oc_pred",
+              "va_rå",
+              "va_pred",
+              "kco_rå",
+             # "kco_pred",
+              #"HR_R_(LM)",
+              #"HR_S_(LM)",
+              "MTT_Rest",
+              "MTT_Stress",
+              "EDV_R","ESV_R","SV_R",#"LVEF_R",
+              "EDV_S","ESV_S","SV_S",#"LVEF_S",
+              #"LVEF_Reser",
+              "PBV_R","PBS_S",
+              "S/R ratio PBV",     
+           #TODO Add lung parameters and PET parameters
+              #weekly_exercise_sessions_baseline +
+              #exercise_intensity_baseline +
+              #exercise_duration_baseline +
+              #"SLE_duration_months",
+              #"SLEDAI_score",
+              #"slicc_score",
+              "FSS",
+              "aerobic_capacity",
+              "vo_2_max",
+              "O2_vent_thresh",
+              "CO2_vent_tresh",
+              "vslope_vent_threshold",
+              "duration_daily_MVPA_pla",
+              "Energy_kJ_mean",
+              "total_fat_percentage"
+  #,
+              
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+              #hemoglobin+
+              #thrombocytes+
+              #beta2_microglobuline+
+              #"all_ifn_netto_t_test",
+              #"ifn_1_netto",
+  )
+
+rndr <- function(x, name, ...) {
+    if (!is.numeric(x)) return(render.categorical.default(x))
+  what <-
+    case_when(
+   name %in% norm_dist ~ c(.="N", .="Mean (SD)", .="NMISS"),
+   T ~ c(.="N",  .="Median [Q1, Q3]", .="NMISS"))
+    parse.abbrev.render.code(c(what))(x)
+}
+
+```
+
+### Create Table
+
+```{r}
+t1_pet_lung<-
+  pet_lung_table_1.data%>%
+  table1(x= ~ 
+              sex +
+              age +
+              Weight+
+              Height+
+              BMI +
+              borg+
+              Body_Surface_DuBois+
+              smoking_status+
+              pack_years+
+              fev_1+
+              fev_1_pred +
+              fev_1_fvc_rå +
+              fev_fvc_pred+
+              tlv_rå+
+              tlv_pred+
+              rv_rå+
+              rv_pred+
+              dlc_oc_rå+
+              dlc_oc_pred+
+              va_rå+
+              va_pred+
+              kco_rå+
+              kco_pred+
+              HR_R_LM+HR_S_LM+MTT_Rest+MTT_Stress+
+              EDV_R+ESV_R+SV_R+LVEF_R+
+              EDV_S+ESV_S+SV_S+LVEF_S+
+              LVEF_Reser+
+              PBV_R+PBS_S+
+              S_R_ratio_PBV+     
+           #TODO Add lung parameters and PET parameters
+              #weekly_exercise_sessions_baseline +
+              #exercise_intensity_baseline +
+              #exercise_duration_baseline +
+              SLE_duration_months+
+              SLEDAI_score+
+              slicc_score+
+              FSS +
+              aerobic_capacity +
+              vo_2_max +
+              O2_vent_thresh+
+              CO2_vent_tresh+
+              vslope_vent_threshold+
+              duration_daily_MVPA_pla+
+              Energy_kJ_mean+
+              #total_fat_percentage+
+              
+              #prednisolone_baseline+
+              #plaquenil_baseline+
+              #methotrexate_baseline+
+              #mycophenolate_baseline+
+              #ciclosporine_baseline+
+              #azathioprine_baseline+
+              #hemoglobin+
+              #thrombocytes+
+              #beta2_microglobuline+
+              all_ifn_netto_t_test+
+              ifn_1_netto|
+              treatment,
+              render=rndr,
+              #render.continuous = c(.="N", .="Mean (SD)", .="Median [Q1, Q3]"),
+              #render.categorical = my.render.cat,
+            #render.missing = T,
+            data = .)
+t1_pet_flex<-t1flex(t1_pet_lung)
+
+
+t1_pet_flex
+```
+
+
+## Table 2
+
+### Data Set
+```{r}
+#TODO
+```
+
+
+##Models Load LMMStar
+
+```{r}
+library(LMMstar)
+pet_lung_data<-
+  pet_lung_data %>%
+  mutate(
+    treat = 
+      case_when(
+        Timepoint =="Baseline" ~ "control",
+        Timepoint =="Screening" ~ "control",
+        T~treatment
+      )
+  )
+```
+
+###fev1
+
+```{r}
+
+model.fev_1<-
+  lmm(
+  formula = 
+    fev_1 ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_1)
+plot(model.fev_1,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_1, type = "scatterplot")
+plot(model.fev_1, type = "scatterplot2")
+plot(model.fev_1, type = "qqplot")
+
+
+
+model.fev_1_interaction <-
+  lmm(
+  formula = 
+    fev_1 ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_1_interaction)
+plot(model.fev_1_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_1_interaction, type = "scatterplot")
+plot(model.fev_1_interaction, type = "scatterplot2")
+plot(model.fev_1_interaction, type = "qqplot")
+```
+
+###fev1_pred
+
+```{r}
+
+model.fev_1_pred<-
+  lmm(
+  formula = 
+    fev_1_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_1_pred)
+plot(model.fev_1_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_1_pred, type = "scatterplot")
+plot(model.fev_1_pred, type = "scatterplot2")
+plot(model.fev_1_pred, type = "qqplot")
+
+
+model.fev_1_pred_interaction <-
+  lmm(
+  formula = 
+    fev_1_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_1_pred_interaction)
+plot(model.fev_1_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_1_pred_interaction, type = "scatterplot")
+plot(model.fev_1_pred_interaction, type = "scatterplot2")
+plot(model.fev_1_pred_interaction, type = "qqplot")
+```
+
+###fev_1_fvc_rå
+
+```{r}
+
+model.fev_1_fvc_rå<-
+  lmm(
+  formula = 
+    fev_1_fvc_rå ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_1_fvc_rå)
+plot(model.fev_1_fvc_rå,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_1_fvc_rå, type = "scatterplot")
+plot(model.fev_1_fvc_rå, type = "scatterplot2")
+plot(model.fev_1_fvc_rå, type = "qqplot")
+
+model.fev_1_fvc_rå_interaction <-
+  lmm(
+  formula = 
+    fev_1_fvc_rå ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_1_fvc_rå_interaction)
+plot(model.fev_1_fvc_rå_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_1_fvc_rå_interaction, type = "scatterplot")
+plot(model.fev_1_fvc_rå_interaction, type = "scatterplot2")
+plot(model.fev_1_fvc_rå_interaction, type = "qqplot")
+```
+
+###fev_fvc_pred
+
+```{r}
+
+model.fev_fvc_pred<-
+  lmm(
+  formula = 
+    fev_fvc_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_fvc_pred)
+plot(model.fev_fvc_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_fvc_pred, type = "scatterplot")
+plot(model.fev_fvc_pred, type = "scatterplot2")
+plot(model.fev_fvc_pred, type = "qqplot")
+
+model.fev_fvc_pred_interaction <-
+  lmm(
+  formula = 
+    fev_fvc_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.fev_fvc_pred_interaction)
+plot(model.fev_fvc_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.fev_fvc_pred_interaction, type = "scatterplot")
+plot(model.fev_fvc_pred_interaction, type = "scatterplot2")
+plot(model.fev_fvc_pred_interaction, type = "qqplot")
+```
+
+###tlv_rå
+
+```{r}
+
+model.tlv_rå<-
+  lmm(
+  formula = 
+    tlv_rå ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.tlv_rå)
+plot(model.tlv_rå,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.tlv_rå, type = "scatterplot")
+plot(model.tlv_rå, type = "scatterplot2")
+plot(model.tlv_rå, type = "qqplot")
+
+model.tlv_rå_interaction <-
+  lmm(
+  formula = 
+    tlv_rå ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.tlv_rå_interaction)
+plot(model.tlv_rå_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.tlv_rå_interaction, type = "scatterplot")
+plot(model.tlv_rå_interaction, type = "scatterplot2")
+plot(model.tlv_rå_interaction, type = "qqplot")
+```
+
+###tlv_pred
+
+```{r}
+
+model.tlv_pred<-
+  lmm(
+  formula = 
+    tlv_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.tlv_pred)
+plot(model.tlv_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.tlv_pred, type = "scatterplot")
+plot(model.tlv_pred, type = "scatterplot2")
+plot(model.tlv_pred, type = "qqplot")
+
+model.tlv_pred_interaction <-
+  lmm(
+  formula = 
+    tlv_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.tlv_pred_interaction)
+plot(model.tlv_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.tlv_pred_interaction, type = "scatterplot")
+plot(model.tlv_pred_interaction, type = "scatterplot2")
+plot(model.tlv_pred_interaction, type = "qqplot")
+```
+
+###rv_rå
+
+```{r}
+
+model.rv_rå<-
+  lmm(
+  formula = 
+    rv_rå ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.rv_rå)
+plot(model.rv_rå,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.rv_rå, type = "scatterplot")
+plot(model.rv_rå, type = "scatterplot2")
+plot(model.rv_rå, type = "qqplot")
+
+
+model.rv_rå_interaction <-
+  lmm(
+  formula = 
+    rv_rå ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.rv_rå_interaction)
+plot(model.rv_rå_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.rv_rå_interaction, type = "scatterplot")
+plot(model.rv_rå_interaction, type = "scatterplot2")
+plot(model.rv_rå_interaction, type = "qqplot")
+```
+
+###rv_pred
+
+```{r}
+
+model.rv_pred<-
+  lmm(
+  formula = 
+    rv_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.rv_pred)
+plot(model.rv_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.rv_pred, type = "scatterplot")
+plot(model.rv_pred, type = "scatterplot2")
+plot(model.rv_pred, type = "qqplot")
+
+
+model.rv_pred_interaction <-
+  lmm(
+  formula = 
+    rv_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.rv_pred_interaction)
+plot(model.rv_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.rv_pred_interaction, type = "scatterplot")
+plot(model.rv_pred_interaction, type = "scatterplot2")
+plot(model.rv_pred_interaction, type = "qqplot")
+```
+
+###dlc_oc_rå
+
+```{r}
+
+model.dlc_oc_rå<-
+  lmm(
+  formula = 
+    dlc_oc_rå ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.dlc_oc_rå)
+plot(model.dlc_oc_rå,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.dlc_oc_rå, type = "scatterplot")
+plot(model.dlc_oc_rå, type = "scatterplot2")
+plot(model.dlc_oc_rå, type = "qqplot")
+
+
+model.dlc_oc_rå_interaction <-
+  lmm(
+  formula = 
+    dlc_oc_rå ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.dlc_oc_rå_interaction)
+plot(model.dlc_oc_rå_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.dlc_oc_rå_interaction, type = "scatterplot")
+plot(model.dlc_oc_rå_interaction, type = "scatterplot2")
+plot(model.dlc_oc_rå_interaction, type = "qqplot")
+```
+
+###dlc_oc_pred
+
+```{r}
+
+model.dlc_oc_pred<-
+  lmm(
+  formula = 
+    dlc_oc_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.dlc_oc_pred)
+plot(model.dlc_oc_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.dlc_oc_pred, type = "scatterplot")
+plot(model.dlc_oc_pred, type = "scatterplot2")
+plot(model.dlc_oc_pred, type = "qqplot")
+
+
+model.dlc_oc_pred_interaction <-
+  lmm(
+  formula = 
+    dlc_oc_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.dlc_oc_pred_interaction)
+plot(model.dlc_oc_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.dlc_oc_pred_interaction, type = "scatterplot")
+plot(model.dlc_oc_pred_interaction, type = "scatterplot2")
+plot(model.dlc_oc_pred_interaction, type = "qqplot")
+```
+
+###va_rå
+
+```{r}
+
+model.va_rå<-
+  lmm(
+  formula = 
+    va_rå ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.va_rå)
+plot(model.va_rå,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.va_rå, type = "scatterplot")
+plot(model.va_rå, type = "scatterplot2")
+plot(model.va_rå, type = "qqplot")
+
+
+model.va_rå_interaction <-
+  lmm(
+  formula = 
+    va_rå ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.va_rå_interaction)
+plot(model.va_rå_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.va_rå_interaction, type = "scatterplot")
+plot(model.va_rå_interaction, type = "scatterplot2")
+plot(model.va_rå_interaction, type = "qqplot")
+```
+
+###va_pred
+
+```{r}
+
+model.va_pred<-
+  lmm(
+  formula = 
+    va_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.va_pred)
+plot(model.va_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.va_pred, type = "scatterplot")
+plot(model.va_pred, type = "scatterplot2")
+plot(model.va_pred, type = "qqplot")
+
+model.va_pred_interaction <-
+  lmm(
+  formula = 
+    va_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.va_pred_interaction)
+plot(model.va_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.va_pred_interaction, type = "scatterplot")
+plot(model.va_pred_interaction, type = "scatterplot2")
+plot(model.va_pred_interaction, type = "qqplot")
+```
+
+###kco_rå
+
+```{r}
+
+model.kco_rå<-
+  lmm(
+  formula = 
+    kco_rå ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.kco_rå)
+plot(model.kco_rå,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.kco_rå, type = "scatterplot")
+plot(model.kco_rå, type = "scatterplot2")
+plot(model.kco_rå, type = "qqplot")
+
+model.kco_rå_interaction <-
+  lmm(
+  formula = 
+    kco_rå ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.kco_rå_interaction)
+plot(model.kco_rå_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.kco_rå_interaction, type = "scatterplot")
+plot(model.kco_rå_interaction, type = "scatterplot2")
+plot(model.kco_rå_interaction, type = "qqplot")
+```
+
+###kco_pred
+
+```{r}
+
+model.kco_pred<-
+  lmm(
+  formula = 
+    kco_pred ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.kco_pred)
+plot(model.kco_pred,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.kco_pred, type = "scatterplot")
+plot(model.kco_pred, type = "scatterplot2")
+plot(model.kco_pred, type = "qqplot")
+
+model.kco_pred_interaction <-
+  lmm(
+  formula = 
+    kco_pred ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.kco_pred_interaction)
+plot(model.kco_pred_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.kco_pred_interaction, type = "scatterplot")
+plot(model.kco_pred_interaction, type = "scatterplot2")
+plot(model.kco_pred_interaction, type = "qqplot")
+```
+
+###HR_R_(LM)
+
+```{r}
+
+model.HR_R_LM<-
+  lmm(
+  formula = 
+    HR_R_LM ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.HR_R_LM)
+plot(model.HR_R_LM,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.HR_R_LM, type = "scatterplot")
+plot(model.HR_R_LM, type = "scatterplot2")
+plot(model.HR_R_LM, type = "qqplot")
+
+model.HR_R_LM_interaction <-
+  lmm(
+  formula = 
+    HR_R_LM ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.HR_R_LM_interaction)
+plot(model.HR_R_LM_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.HR_R_LM_interaction, type = "scatterplot")
+plot(model.HR_R_LM_interaction, type = "scatterplot2")
+plot(model.HR_R_LM_interaction, type = "qqplot")
+```
+
+###HR_S_LM
+
+```{r}
+
+model.HR_S_LM<-
+  lmm(
+  formula = 
+    HR_S_LM ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.HR_S_LM)
+plot(model.HR_S_LM,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.HR_S_LM, type = "scatterplot")
+plot(model.HR_S_LM, type = "scatterplot2")
+plot(model.HR_S_LM, type = "qqplot")
+
+model.HR_S_LM_interaction <-
+  lmm(
+  formula = 
+    HR_S_LM ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.HR_S_LM_interaction)
+plot(model.HR_S_LM_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.HR_S_LM_interaction, type = "scatterplot")
+plot(model.HR_S_LM_interaction, type = "scatterplot2")
+plot(model.HR_S_LM_interaction, type = "qqplot")
+```
+
+###MTT_Rest
+
+```{r}
+
+model.MTT_Rest<-
+  lmm(
+  formula = 
+    MTT_Rest ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.MTT_Rest)
+plot(model.MTT_Rest,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.MTT_Rest, type = "scatterplot")
+plot(model.MTT_Rest, type = "scatterplot2")
+plot(model.MTT_Rest, type = "qqplot")
+
+model.MTT_Rest_interaction <-
+  lmm(
+  formula = 
+    MTT_Rest ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.MTT_Rest_interaction)
+plot(model.MTT_Rest_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.MTT_Rest_interaction, type = "scatterplot")
+plot(model.MTT_Rest_interaction, type = "scatterplot2")
+plot(model.MTT_Rest_interaction, type = "qqplot")
+
+
+model.MTT_Rest_interaction2 <- #Controlled for IFN-1 signature
+  lmm(
+  formula = 
+    MTT_Rest ~
+    Timepoint+
+    sex+
+    Timepoint:treatment+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treatment,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+
+plot(model.MTT_Rest_interaction2,
+     col = "treatment",
+     at = data.frame(sex = "Female", ifn_1_netto=median(pet_lung_data$ifn_1_netto, na.rm = T)),
+     #facet = ~ treatment,
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.MTT_Rest_interaction2, type = "scatterplot")
+plot(model.MTT_Rest_interaction2, type = "scatterplot2")
+plot(model.MTT_Rest_interaction2, type = "qqplot")
+```
+
+###MTT_Stress
+
+```{r}
+
+model.MTT_Stress<-
+  lmm(
+  formula = 
+    MTT_Stress ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.MTT_Stress)
+plot(model.MTT_Stress,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.MTT_Stress, type = "scatterplot")
+plot(model.MTT_Stress, type = "scatterplot2")
+plot(model.MTT_Stress, type = "qqplot")
+
+model.MTT_Stress_interaction <-
+  lmm(
+  formula = 
+    MTT_Stress ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.MTT_Stress_interaction)
+plot(model.MTT_Stress_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.MTT_Stress_interaction, type = "scatterplot")
+plot(model.MTT_Stress_interaction, type = "scatterplot2")
+plot(model.MTT_Stress_interaction, type = "qqplot")
+```
+
+###EDV_R
+
+```{r}
+
+model.EDV_R<-
+  lmm(
+  formula = 
+    EDV_R ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.EDV_R)
+plot(model.EDV_R,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.EDV_R, type = "scatterplot")
+plot(model.EDV_R, type = "scatterplot2")
+plot(model.EDV_R, type = "qqplot")
+
+model.EDV_R_interaction <-
+  lmm(
+  formula = 
+    EDV_R ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.EDV_R_interaction)
+plot(model.EDV_R_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.EDV_R_interaction, type = "scatterplot")
+plot(model.EDV_R_interaction, type = "scatterplot2")
+plot(model.EDV_R_interaction, type = "qqplot")
+```
+
+###ESV_R
+NOTE THIS MODEL IS OVERFITTED, See the residuals vs fitted plots.
+```{r}
+
+model.ESV_R<-
+  lmm(
+  formula = 
+    ESV_R ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.ESV_R)
+plot(model.ESV_R,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.ESV_R, type = "scatterplot")
+plot(model.ESV_R, type = "scatterplot2")
+plot(model.ESV_R, type = "qqplot")
+
+model.ESV_R_interaction <-
+  lmm(
+  formula = 
+    ESV_R ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.ESV_R_interaction)
+plot(model.ESV_R_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.ESV_R_interaction, type = "scatterplot")
+plot(model.ESV_R_interaction, type = "scatterplot2")
+plot(model.ESV_R_interaction, type = "qqplot")
+```
+
+###SV_R
+
+```{r}
+
+model.SV_R<-
+  lmm(
+  formula = 
+    SV_R ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.SV_R)
+plot(model.SV_R,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.SV_R, type = "scatterplot")
+plot(model.SV_R, type = "scatterplot2")
+plot(model.SV_R, type = "qqplot")
+
+model.SV_R_interaction <-
+  lmm(
+  formula = 
+    SV_R ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.SV_R_interaction)
+plot(model.SV_R_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.SV_R_interaction, type = "scatterplot")
+plot(model.SV_R_interaction, type = "scatterplot2")
+plot(model.SV_R_interaction, type = "qqplot")
+```
+
+###LVEF_R
+
+```{r}
+
+model.LVEF_R<-
+  lmm(
+  formula = 
+    LVEF_R ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.LVEF_R)
+plot(model.LVEF_R,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.LVEF_R, type = "scatterplot")
+plot(model.LVEF_R, type = "scatterplot2")
+plot(model.LVEF_R, type = "qqplot")
+
+model.LVEF_R_interaction <-
+  lmm(
+  formula = 
+    LVEF_R ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.LVEF_R_interaction)
+plot(model.LVEF_R_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.LVEF_R_interaction, type = "scatterplot")
+plot(model.LVEF_R_interaction, type = "scatterplot2")
+plot(model.LVEF_R_interaction, type = "qqplot")
+```
+
+###EDV_S
+
+```{r}
+
+model.EDV_S<-
+  lmm(
+  formula = 
+    EDV_S ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.EDV_S)
+plot(model.EDV_S,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.EDV_S, type = "scatterplot")
+plot(model.EDV_S, type = "scatterplot2")
+plot(model.EDV_S, type = "qqplot")
+
+model.EDV_S_interaction <-
+  lmm(
+  formula = 
+    EDV_S ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.EDV_S_interaction)
+plot(model.EDV_S_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.EDV_S_interaction, type = "scatterplot")
+plot(model.EDV_S_interaction, type = "scatterplot2")
+plot(model.EDV_S_interaction, type = "qqplot")
+```
+
+###ESV_S
+
+```{r}
+
+model.ESV_S<-
+  lmm(
+  formula = 
+    ESV_S ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.ESV_S)
+plot(model.ESV_S,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.ESV_S, type = "scatterplot")
+plot(model.ESV_S, type = "scatterplot2")
+plot(model.ESV_S, type = "qqplot")
+
+model.ESV_S_interaction <-
+  lmm(
+  formula = 
+    ESV_S ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.ESV_S_interaction)
+plot(model.ESV_S_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.ESV_S_interaction, type = "scatterplot")
+plot(model.ESV_S_interaction, type = "scatterplot2")
+plot(model.ESV_S_interaction, type = "qqplot")
+```
+
+###SV_S
+
+```{r}
+
+model.SV_S<-
+  lmm(
+  formula = 
+    SV_S ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.SV_S)
+plot(model.SV_S,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.SV_S, type = "scatterplot")
+plot(model.SV_S, type = "scatterplot2")
+plot(model.SV_S, type = "qqplot")
+
+model.SV_S_interaction <-
+  lmm(
+  formula = 
+    SV_S ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.SV_S_interaction)
+plot(model.SV_S_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.SV_S_interaction, type = "scatterplot")
+plot(model.SV_S_interaction, type = "scatterplot2")
+plot(model.SV_S_interaction, type = "qqplot")
+```
+
+###LVEF_S
+
+```{r}
+
+model.LVEF_S<-
+  lmm(
+  formula = 
+    LVEF_S ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.LVEF_S)
+plot(model.LVEF_S,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.LVEF_S, type = "scatterplot")
+plot(model.LVEF_S, type = "scatterplot2")
+plot(model.LVEF_S, type = "qqplot")
+
+model.LVEF_S_interaction <-
+  lmm(
+  formula = 
+    LVEF_S ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.LVEF_S_interaction)
+plot(model.LVEF_S_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.LVEF_S_interaction, type = "scatterplot")
+plot(model.LVEF_S_interaction, type = "scatterplot2")
+plot(model.LVEF_S_interaction, type = "qqplot")
+```
+
+###LVEF_Reser
+
+```{r}
+
+model.LVEF_Reser<-
+  lmm(
+  formula = 
+    LVEF_Reser ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.LVEF_Reser)
+plot(model.LVEF_Reser,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.LVEF_Reser, type = "scatterplot")
+plot(model.LVEF_Reser, type = "scatterplot2")
+plot(model.LVEF_Reser, type = "qqplot")
+
+model.LVEF_Reser_interaction <-
+  lmm(
+  formula = 
+    LVEF_Reser ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.LVEF_Reser_interaction)
+plot(model.LVEF_Reser_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.LVEF_Reser_interaction, type = "scatterplot")
+plot(model.LVEF_Reser_interaction, type = "scatterplot2")
+plot(model.LVEF_Reser_interaction, type = "qqplot")
+```
+
+###PBV_R
+
+```{r}
+
+model.PBV_R<-
+  lmm(
+  formula = 
+    PBV_R ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.PBV_R)
+plot(model.PBV_R,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.PBV_R, type = "scatterplot")
+plot(model.PBV_R, type = "scatterplot2")
+plot(model.PBV_R, type = "qqplot")
+
+model.PBV_R_interaction <-
+  lmm(
+  formula = 
+    PBV_R ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.PBV_R_interaction)
+plot(model.PBV_R_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.PBV_R_interaction, type = "scatterplot")
+plot(model.PBV_R_interaction, type = "scatterplot2")
+plot(model.PBV_R_interaction, type = "qqplot")
+```
+
+###PBS_S
+
+```{r}
+
+model.PBS_S<-
+  lmm(
+  formula = 
+    PBS_S ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.PBS_S)
+plot(model.PBS_S,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.PBS_S, type = "scatterplot")
+plot(model.PBS_S, type = "scatterplot2")
+plot(model.PBS_S, type = "qqplot")
+
+model.PBS_S_interaction <-
+  lmm(
+  formula = 
+    PBS_S ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.PBS_S_interaction)
+plot(model.PBS_S_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.PBS_S_interaction, type = "scatterplot")
+plot(model.PBS_S_interaction, type = "scatterplot2")
+plot(model.PBS_S_interaction, type = "qqplot")
+```
+
+###O2_vent_thresh
+
+```{r}
+
+model.O2_vent_thresh<-
+  lmm(
+  formula = 
+    O2_vent_thresh ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.O2_vent_thresh)
+plot(model.O2_vent_thresh,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.O2_vent_thresh, type = "scatterplot")
+plot(model.O2_vent_thresh, type = "scatterplot2")
+plot(model.O2_vent_thresh, type = "qqplot")
+
+model.O2_vent_thresh_interaction <-
+  lmm(
+  formula = 
+    O2_vent_thresh ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.O2_vent_thresh_interaction)
+plot(model.O2_vent_thresh_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.O2_vent_thresh_interaction, type = "scatterplot")
+plot(model.O2_vent_thresh_interaction, type = "scatterplot2")
+plot(model.O2_vent_thresh_interaction, type = "qqplot")
+```
+
+###CO2_vent_thresh
+
+```{r}
+
+model.CO2_vent_thresh<-
+  lmm(
+  formula = 
+    CO2_vent_tresh ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.CO2_vent_thresh)
+plot(model.CO2_vent_thresh,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.CO2_vent_thresh, type = "scatterplot")
+plot(model.CO2_vent_thresh, type = "scatterplot2")
+plot(model.CO2_vent_thresh, type = "qqplot")
+
+model.CO2_vent_thresh_interaction <-
+  lmm(
+  formula = 
+    CO2_vent_tresh ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.CO2_vent_thresh_interaction)
+plot(model.CO2_vent_thresh_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.CO2_vent_thresh_interaction, type = "scatterplot")
+plot(model.CO2_vent_thresh_interaction, type = "scatterplot2")
+plot(model.CO2_vent_thresh_interaction, type = "qqplot")
+```
+
+###vslope_vent_threshold
+
+```{r}
+
+model.vslope_vent_threshold<-
+  lmm(
+  formula = 
+    vslope_vent_threshold ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.vslope_vent_threshold)
+plot(model.vslope_vent_threshold,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.vslope_vent_threshold, type = "scatterplot")
+plot(model.vslope_vent_threshold, type = "scatterplot2")
+plot(model.vslope_vent_threshold, type = "qqplot")
+
+model.vslope_vent_threshold_interaction <-
+  lmm(
+  formula = 
+    vslope_vent_threshold ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.vslope_vent_threshold_interaction)
+plot(model.vslope_vent_threshold_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.vslope_vent_threshold_interaction, type = "scatterplot")
+plot(model.vslope_vent_threshold_interaction, type = "scatterplot2")
+plot(model.vslope_vent_threshold_interaction, type = "qqplot")
+```
+
+###FSS
+
+```{r}
+
+model.FSS<-
+  lmm(
+  formula = 
+    FSS ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.FSS)
+plot(model.FSS,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.FSS, type = "scatterplot")
+plot(model.FSS, type = "scatterplot2")
+plot(model.FSS, type = "qqplot")
+
+model.FSS_interaction <-
+  lmm(
+  formula = 
+    FSS ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.FSS_interaction)
+plot(model.FSS_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.FSS_interaction, type = "scatterplot")
+plot(model.FSS_interaction, type = "scatterplot2")
+plot(model.FSS_interaction, type = "qqplot")
+```
+
+###aerobic_capacity
+
+```{r}
+
+model.aerobic_capacity<-
+  lmm(
+  formula = 
+    aerobic_capacity ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.aerobic_capacity)
+plot(model.aerobic_capacity,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.aerobic_capacity, type = "scatterplot")
+plot(model.aerobic_capacity, type = "scatterplot2")
+plot(model.aerobic_capacity, type = "qqplot")
+
+model.aerobic_capacity_interaction <-
+  lmm(
+  formula = 
+    aerobic_capacity ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.aerobic_capacity_interaction)
+plot(model.aerobic_capacity_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.aerobic_capacity_interaction, type = "scatterplot")
+plot(model.aerobic_capacity_interaction, type = "scatterplot2")
+plot(model.aerobic_capacity_interaction, type = "qqplot")
+```
+
+###vo_2_max
+
+```{r}
+
+model.vo_2_max<-
+  lmm(
+  formula = 
+    vo_2_max ~ Timepoint + treat:Timepoint+sex,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.vo_2_max)
+plot(model.vo_2_max,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.vo_2_max, type = "scatterplot")
+plot(model.vo_2_max, type = "scatterplot2")
+plot(model.vo_2_max, type = "qqplot")
+
+model.vo_2_max_interaction <-
+  lmm(
+  formula = 
+    vo_2_max ~
+    Timepoint+
+    sex+
+    Timepoint:treat+
+    ifn_1_netto+
+    ifn_1_netto:Timepoint+
+    ifn_1_netto:Timepoint:treat,
+  repetition = ~Timepoint|id,
+  structure = "UN",
+  data=pet_lung_data
+)
+summary(model.vo_2_max_interaction)
+plot(model.vo_2_max_interaction,
+     col = "treatment",
+     at = data.frame(sex = "Female"),
+     facet = ~ cut_interval(ifn_1_netto, 3),
+     ci = F,
+     obs.alpha = 0.2)
+
+plot(model.vo_2_max_interaction, type = "scatterplot")
+plot(model.vo_2_max_interaction, type = "scatterplot2")
+plot(model.vo_2_max_interaction, type = "qqplot")
+```
+
+### For Loop
+
+```{r eval = F}
+list_main_models <- list()
+list_interaction_models <- list()
+list_outcomes<-list(
+              "fev_1",
+              "fev_1_pred",
+              "fev_1_fvc_rå",
+              "fev_fvc_pred",
+              "tlv_rå",
+              "tlv_pred",
+              "rv_rå",
+              "rv_pred",
+              "dlc_oc_rå",
+              "dlc_oc_pred",
+              "va_rå",
+              "va_pred",
+              "kco_rå",
+              "kco_pred",
+              "HR_R_(LM)",
+              "HR_S_(LM)",
+              "MTT_Rest",
+              "MTT_Stress",
+              "EDV_R","ESV_R","SV_R","LVEF_R",
+              "EDV_S","ESV_S","SV_S","LVEF_S",
+              "LVEF_Reser",
+              "PBV_R","PBS_S",
+              "S/R ratio PBV",     
+           #TODO Add lung parameters and PET parameters
+              #weekly_exercise_sessions_baseline +
+              #exercise_intensity_baseline +
+              #exercise_duration_baseline +
+              #"SLE_duration_months",
+              #"SLEDAI_score",
+              #"slicc_score",
+              "FSS",
+              "aerobic_capacity",
+              "vo_2_max",
+              "O2_vent_thresh",
+              "CO2_vent_tresh",
+              "vslope_vent_threshold",
+              "duration_daily_MVPA_pla",
+              "Energy_kJ_mean",
+              "total_fat_percentage"
+  )
+
+for (var in list_outcomes){
+  model_main <-
+    lmm(
+      formula = reformulate(
+        "Timepoint + treat:Timepoint + sex",
+        response = var
+      ),
+    repetition = ~Timepoint|id,
+    structure = "UN",
+    data=pet_lung_data
+    )
+  
+  #plot(
+  #  model_main, col = "treatment", 
+  #   ci = F,
+  #   obs.alpha = 0.2
+  #)
+  #plot(model_main, type = "scatterplot")
+  #plot(model_main, type = "scatterplot2")
+  #plot(model_main, type = "qqplot")
+  #summary(model_main)
+  
+  model_main_list <- list(
+     plot(
+    model_main, col = "treatment", 
+     ci = F,
+     obs.alpha = 0.2
+  ),
+  plot(model_main, type = "scatterplot"),
+  plot(model_main, type = "scatterplot2"),
+  plot(model_main, type = "qqplot"),
+  summary(model_main)
+  )
+  
+  list_main_models[var]<-model_main_list
+  
+}
+
+
+```
+
+Let's test the

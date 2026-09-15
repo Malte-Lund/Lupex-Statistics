@@ -32,6 +32,8 @@ library(renv)
 library(butils)
 #install.packages("patchwork")
 library(patchwork)
+#install.packages("ggpubr")
+library(ggpubr)
 
 mITT =T
 PP=F
@@ -77,8 +79,16 @@ vo2max.data.full<-
     timepoint == "screening" ~ "control",
     timepoint == "followup" ~ treatment,
     T~NA_character_
-  ))%>%mutate(
+  ),
+  treat_plot = case_when(
+    timepoint == "baseline" ~ treatment,
+    timepoint == "screening" ~ "control",
+    timepoint == "followup" ~ treatment,
+    T~NA_character_
+  )
+  )%>%mutate(
     treat = factor(treat, levels = c("control", "exercise")),
+    treat_plot = factor(treat, levels = c("control", "exercise")),
     timepoint = factor(timepoint, levels = c("screening", "baseline", "followup"))
   )
 
@@ -180,7 +190,15 @@ summy <- summarize(easytrialQualityTest ~ treatment+timepoint|id, data = vo2_wit
 print(summy, digits = 2)
 ### Manual quality control:
 
+##Get Age
 
+age.data<-
+  read_excel(path = here("Data","Data.Table1.xlsx"))%>%
+  dplyr::select(id,age)%>%
+  dplyr::filter(
+    !duplicated(id)
+  )
+age.data
 ```
 
 # Models on quality controlled data.
@@ -188,17 +206,19 @@ print(summy, digits = 2)
 ### Easytrial Assessment
 
 ```{r}
+
 Easytrial_Vo2max <- 
   vo2_with_quality_controls2 |> 
   dplyr::filter(easytrialQualityTest)|>
   group_by(id) %>% 
-    filter(!duplicated(timepoint))
+    filter(!duplicated(timepoint))%>%
+  left_join(age.data)
 
 Easytrial_Vo2max_no_screening<- #So both Søren And Bente says that the screening measurements aren't usable, this is true, since the screening was done on patients just entering the door, and on baseline and followup it was done on patients after an OGTT and a meal.
   # I also conferred with Julie, since using the data with the screening is in the SAP thats the primary analysis, the other is ancillary and we'll interpret both.
-Easytrial_Vo2max|>
-  dplyr::filter(timepoint != "screening")|>
-  mutate(timepoint = factor(timepoint, levels = c("baseline", "followup")) )
+  Easytrial_Vo2max|>
+    dplyr::filter(timepoint != "screening")|>
+    mutate(timepoint = factor(timepoint, levels = c("baseline", "followup")) )
 
 #-------------------------
 
@@ -220,6 +240,18 @@ plot(model.main_after_QC_with_screen.aerobic_capacity.lmm, type = "scatterplot")
 plot(model.main_after_QC_with_screen.aerobic_capacity.lmm, type = "qqplot")
 #anova(model1.kondital.lmm)
 
+model.main_after_QC_with_screen.aerobic_capacity_AGECORRECTED.lmm<-lmm(
+  formula = aerobiccapacity ~ 
+    timepoint+treat:timepoint+sex+age,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+)
+summary(model.main_after_QC_with_screen.aerobic_capacity_AGECORRECTED.lmm, level = 0.975)
+anova(model.main_after_QC_with_screen.aerobic_capacity_AGECORRECTED.lmm)
+plot(model.main_after_QC_with_screen.aerobic_capacity_AGECORRECTED.lmm, type = "scatterplot")
+plot(model.main_after_QC_with_screen.aerobic_capacity_AGECORRECTED.lmm, type = "qqplot")
+
 #With interaction effect 
 model.ifn1_interaction_after_QC_withscreen.aerobic_capacity.lmm<-lmm(
   formula = 
@@ -239,6 +271,30 @@ summary(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity.lmm, level =
 
 plot(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "qqplot")
 plot(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "scatterplot")
+
+##Age corrected
+
+#With interaction effect 
+model.ifn1_interaction_after_QC_withscreen.aerobic_capacity_AGECORRECTED.lmm<-lmm(
+  formula = 
+    aerobiccapacity ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    age+
+    ifn_1_netto+
+    ifn_1_netto:timepoint+
+    ifn_1_netto:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+  )
+
+summary(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity_AGECORRECTED.lmm, level = 0.975)
+
+plot(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity_AGECORRECTED.lmm, type = "qqplot")
+plot(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity_AGECORRECTED.lmm, type = "scatterplot")
+
 
 #This is the interaction model on VO2max
 model.ifn1_interaction_after_QC.vo2max.lmm<-lmm(
@@ -304,6 +360,8 @@ plot(model.ifn1_interaction_after_QC.aerobiccapacity_No_screen.lmm, type = "qqpl
 plot(model.ifn1_interaction_after_QC.aerobiccapacity_No_screen.lmm, type = "scatterplot")
 
 ```
+
+Post
 
 ## Models before QC assessment
 
@@ -949,6 +1007,296 @@ plot(model.ifn_elsherb_interaction_after_QC.aerobic_capacity_diff_at_followup.lm
 plot(model.ifn_elsherb_interaction_after_QC.aerobic_capacity_diff_at_followup.lmm, type = "qqplot")
 
 
+
+```
+
+### Post Hoc Analysis as required by reviewer 2
+
+```{r}
+Easytrial_Vo2max<-
+  Easytrial_Vo2max%>%
+  mutate(
+    IFN1_high_low = factor(
+      case_when( ifn_1_netto<=2 ~ "< 2",
+                 ifn_1_netto>2 ~ "> 2",
+                 T~NA_character_), levels = c("< 2","> 2")),
+    IFN1_treatment = factor(
+      paste(
+        "Intervention:",treatment, "IFN1", IFN1_high_low
+      ),
+      levels = c(
+        "Intervention: control IFN1 NA",
+        "Intervention: control IFN1 < 2",
+        "Intervention: control IFN1 > 2",
+        "Intervention: exercise IFN1 < 2",
+        "Intervention: exercise IFN1 > 2"
+      )
+    )
+  )
+
+model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm<-lmm(
+  formula = 
+    aerobiccapacity ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    IFN1_high_low+
+    IFN1_high_low:timepoint+
+    IFN1_high_low:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+  )
+
+summary(model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm, level = 0.95)
+
+plot(model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "qqplot")
+plot(model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "scatterplot")
+
+
+model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.plot<-
+  plot(model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "fit", at = data.frame( sex = "F"), color = "IFN1_treatment")
+
+
+vo2max.IFN1_high_low.prettyplot<-
+  model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.plot$plot + 
+  scale_color_manual(
+  values = c("red","blue","hotpink","purple")
+)+ scale_fill_manual(
+  values = c("red","blue","hotpink","purple")
+)+theme_bw()+
+  labs(x = "", y = bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)), color = "Treatment and IFN-1")+
+  guides(fill="none")
+vo2max.IFN1_high_low.prettyplot
+
+
+model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.plot_individual_data<-
+  plot(model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "fit", at = data.frame( sex = "F"), color = "IFN1_treatment", ci = F, obs.alpha = 0.25)
+
+vo2max.individual_data_IFN1_high_low.prettyplot<-
+  model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.plot_individual_data$plot + 
+  scale_color_manual(
+  values = c("red","blue","hotpink","purple")
+)+ scale_fill_manual(
+  values = c("red","blue","hotpink","purple")
+)+
+  theme_bw()+
+  labs(x = "", y = bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)), color = "Treatment and IFN-1")
+
+vo2max.individual_data_IFN1_high_low.prettyplot
+
+vo2max.model.IFN1_high_low.FSS.lmm.plot_facet<-
+  plot(model.ifn1_high_low_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "fit", at = data.frame( sex = "F"), color = "treatment", facet = ~IFN1_high_low, ci = F, obs.alpha = 0.25)
+
+vo2max.model.IFN1_high_low.FSS.lmm.facet_pretty.plot<-
+  vo2max.model.IFN1_high_low.FSS.lmm.plot_facet$plot+
+  theme_bw()+
+  labs(x = "", y = bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)), color = "Treatment")
+vo2max.model.IFN1_high_low.FSS.lmm.facet_pretty.plot
+
+vo2max.model.IFN1_high_low.FSS.lmm.facet_pretty.plot%>%
+ggsave(
+  filename = here("output","graphics","vo2max.model.IFN1_high_low.FSS.lmm.facet_pretty.plot.jpg"),
+  width = 12
+)
+
+vo2max.individual_data_IFN1_high_low.prettyplot%>%
+ggsave(
+  filename = here("output","graphics","vo2max.individual_data_IFN1_high_low.prettyplot.jpg"),
+  width = 12
+)
+
+
+vo2max.IFN1_high_low.prettyplot%>%
+ggsave(
+  filename = here("output","graphics","vo2max.IFN1_high_low.prettyplot.jpg"),
+  width = 12
+)
+#---- Vo2max
+model.sexinteraction.vo2max.lmm<-lmm(
+  formula = aerobiccapacity ~ timepoint+treat:timepoint+sex+sex:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+)
+summary(model.sexinteraction.vo2max.lmm, level = 0.95)
+plot(model.sexinteraction.vo2max.lmm, type=c("qqplot"))
+plot(model.sexinteraction.vo2max.lmm, type=c("scatterplot"))
+plot.model.sexinteraction.vo2max<-
+  plot(model.sexinteraction.vo2max.lmm, type=c("fit"), facet = ~sex, color = "treatment")
+
+plot.sexinteraction.vo2max<-
+  plot.model.sexinteraction.vo2max$plot+
+  theme_bw()+
+  labs(
+    y=bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)),
+    x="",
+    color ="",
+    fill =""
+  )
+#linear.mixed.model.list$model25.main.fatigue_as_vo2max.lmm<-
+ # model.tables(model25.main.fatigue_as_vo2max.lmm, level =0.975)
+plot.sexinteraction.vo2max
+
+plot.sexinteraction.vo2max%>%
+  ggsave(
+  filename = here("output","graphics","vo2max.plot.sexinteraction.jpg"),
+  width = 12
+)
+
+plot.sexinteraction.model.individual_point.vo2max<-
+  plot(model.sexinteraction.vo2max.lmm, type=c("fit"), facet = ~sex, color = "treatment", ci=F, obs.alpha = .25)
+
+plot.sexinteraction.individual_point.vo2max<-
+  plot.sexinteraction.model.individual_point.vo2max$plot+
+  theme_bw()+
+  labs(
+    y=bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)),
+    x="",
+    color ="",
+    fill =""
+  )
+#linear.mixed.model.list$model25.main.fatigue_as_vo2max.lmm<-
+ # model.tables(model25.main.fatigue_as_vo2max.lmm, level =0.975)
+plot.sexinteraction.individual_point.vo2max
+
+plot.sexinteraction.individual_point.vo2max%>%
+  ggsave(
+  filename = here("output","graphics","vo2max.plot.individualpoint.sexinteraction.jpg"),
+  width = 12
+)
+#J Williams Aerobic Capacity score
+model.JW_interaction_after_QC_withscreen.aerobic_capacity.lmm<-lmm(
+  formula = 
+    aerobiccapacity ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    j_williams_aerobic+
+    j_williams_aerobic:timepoint+
+    j_williams_aerobic:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+  )
+
+summary(model.JW_interaction_after_QC_withscreen.aerobic_capacity.lmm, level = 0.95)
+
+plot(model.JW_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "qqplot")
+plot(model.JW_interaction_after_QC_withscreen.aerobic_capacity.lmm, type = "scatterplot")
+
+
+
+```
+
+##### Post Hoc no screen
+
+```{r}
+
+Easytrial_Vo2max_no_screening<-
+  Easytrial_Vo2max_no_screening%>%
+  mutate(
+    IFN1_high_low = factor(
+      case_when( ifn_1_netto<=2 ~ "< 2",
+                 ifn_1_netto>2 ~ "> 2",
+                 T~NA_character_), levels = c("< 2","> 2")),
+    IFN1_treatment = factor(
+      paste(
+        "Intervention:",treatment, "IFN1", IFN1_high_low
+      ),
+      levels = c(
+        "Intervention: control IFN1 NA",
+        "Intervention: control IFN1 < 2",
+        "Intervention: control IFN1 > 2",
+        "Intervention: exercise IFN1 < 2",
+        "Intervention: exercise IFN1 > 2"
+      )
+    )
+  )
+
+model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm<-lmm(
+  formula = 
+    aerobiccapacity ~ 
+    timepoint+
+    sex+
+    timepoint:treat+
+    IFN1_high_low+
+    IFN1_high_low:timepoint+
+    IFN1_high_low:timepoint:treat,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max_no_screening
+  )
+
+summary(model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm, level = 0.95)
+
+plot(model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm, type = "qqplot")
+plot(model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm, type = "scatterplot")
+
+
+model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.plot<-
+  plot(model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm, type = "fit", at = data.frame( sex = "F"), color = "IFN1_treatment")
+
+
+vo2max.IFN1_high_low.noscreen.prettyplot<-
+  model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.plot$plot + 
+  scale_color_manual(
+  values = c("red","blue","hotpink","purple")
+)+ scale_fill_manual(
+  values = c("red","blue","hotpink","purple")
+)+theme_bw()+
+  labs(x = "", y = bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)), color = "Treatment and IFN-1")+
+  guides(fill="none")
+
+
+vo2max.IFN1_high_low.noscreen.prettyplot%>%
+ggsave(
+  filename = here("output","graphics","vo2max.IFN1_high_low.noscreen.prettyplot.jpg"),
+  width = 12
+)
+
+model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.plot_individual_data<-
+  plot(model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm, type = "fit", at = data.frame( sex = "F"), color = "IFN1_treatment", ci = F, obs.alpha = 0.25)
+
+
+
+
+vo2max.individual_data_noscreen_IFN1_high_low.prettyplot<-
+  model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.plot_individual_data$plot + 
+  scale_color_manual(
+  values = c("red","blue","hotpink","purple")
+)+ scale_fill_manual(
+  values = c("red","blue","hotpink","purple")
+)+
+  theme_bw()+
+  labs(x = "", y = bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)), color = "Treatment and IFN-1")
+
+vo2max.individual_data_noscreen_IFN1_high_low.prettyplot
+
+vo2max.individual_data_noscreen_IFN1_high_low.prettyplot%>%
+ggsave(
+  filename = here("output","graphics","vo2max.individual_data_noscreen_IFN1_high_low.prettyplot.jpg"),
+  width = 12
+)
+
+
+vo2max.model.IFN1_high_low.noscreen.lmm.plot_facet<-
+  plot(model.ifn1_high_low_interaction_after_QC_noscreen.aerobic_capacity.lmm, type = "fit", at = data.frame( sex = "F"), color = "treatment", facet = ~IFN1_high_low, ci = F, obs.alpha = 0.25)
+
+vo2max.model.IFN1_high_low.noscreen.lmm.facet_pretty.plot<-
+  vo2max.model.IFN1_high_low.noscreen.lmm.plot_facet$plot+
+  theme_bw()+
+  labs(x = "", y = bquote(dot(V)*O[2]~max ~ (ml~min^-1~kg^-1)), color = "")
+vo2max.model.IFN1_high_low.noscreen.lmm.facet_pretty.plot
+
+vo2max.model.IFN1_high_low.noscreen.lmm.facet_pretty.plot%>%
+ggsave(
+  filename = here("output","graphics","vo2max.model.IFN1_high_low.noscreen.lmm.facet_pretty.plot.jpg"),
+  width = 12
+)
+
+
+
 ```
 
 #### With no constrain on baseline IFN and treatment
@@ -1280,8 +1628,10 @@ Easytrial_Vo2max<-
  
 ```
 
-## Model on Quantile Interaction, 
+## Model on Quantile Interaction,
+
 because it makes it easier to do graphics for the pretty plot
+
 ```{r}
 model18.ifn1_quantile_interaction.aerobic_capacity.lmm<-lmm(
   formula = aerobiccapacity ~ 
@@ -1384,7 +1734,9 @@ model_plot<-plot(model.ifn1_quantile_interaction.aerobic_capacity_no_sex.lmm, ty
      facet = ~ifn1_quantile_at_baseline)
 
 ```
-## Model on IFN-1 Elevation 
+
+## Model on IFN-1 Elevation
+
 because it makes it easier to do graphics for
 
 ```{r}
@@ -1413,6 +1765,8 @@ plot(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, type = "qqplot")
 effects(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, variable = c("treat"))
 
 plot(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, type = "fit")
+plot(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, type = "fit", facet = ~ifn1_elevated_at_baseline)
+
 
 model19_plot<-
   plot(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, type = "fit", 
@@ -1423,7 +1777,21 @@ model19_plot<-
      colo="treat_constrain_at_base", 
      facet = ~ifn1_elevated_at_baseline,
      at = data.frame(sex = "F"))
+model19_plot$plot
+effectsmodel3.IFNelecated<-effects(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, 
+        variable = "treat", 
+        conditional = c("timepoint", "ifn1_elevated_at_baseline"))
 
+model19_plot_CI<-
+  plot(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, type = "fit", 
+     obs.alpha = 0, 
+     ci = T, 
+     ci.alpha = 0.1,
+     size.text = 12, 
+     colo="treatment", 
+     facet = ~ifn1_elevated_at_baseline,
+     at = data.frame(sex = "F"))
+model19_plot_CI$plot
 effectsmodel3.IFNelecated<-effects(model19.ifn1_elevation_interaction.aerobic_capacity.lmm, 
         variable = "treat", 
         conditional = c("timepoint", "ifn1_elevated_at_baseline"))
@@ -1461,7 +1829,70 @@ saveRDS(model19_plot,
         file = here("output", "graphics", "asRDS", "Aerobic_Capacity_IFN_elevation_Effect_plot.rds"))
 
 
+model19.ifn1_elevation_interaction.aerobic_capacity_AGECORRECTED.lmm<-lmm(
+  formula = aerobiccapacity ~ 
+    timepoint+
+    treat:timepoint+ 
+    ifn1_elevated_at_baseline+
+    age+
+    timepoint:ifn1_elevated_at_baseline+
+    treat:timepoint:ifn1_elevated_at_baseline+
+    sex,
+  repetition = ~timepoint|id,
+  structure = "UN",
+  data = Easytrial_Vo2max
+    
+)
+
+#TODO Add effect of Anti-DsDNA
+#TODO check most stable IFN-signature
+
+summary(model19.ifn1_elevation_interaction.aerobic_capacity_AGECORRECTED.lmm, level = 0.975)
+plot(model19.ifn1_elevation_interaction.aerobic_capacity_AGECORRECTED.lmm, type = "scatterplot")
+plot(model19.ifn1_elevation_interaction.aerobic_capacity_AGECORRECTED.lmm, type = "qqplot")
+#anova(model2.kondital.lmm)
+
+model.tables(model19.ifn1_elevation_interaction.aerobic_capacity_AGECORRECTED.lmm)
+model.tables(model19.ifn1_elevation_interaction.aerobic_capacity.lmm)
+
+glht_link_age <-
+  rbind(
+    "normal" = c( 0,0,0,0,0,0,0,1,0,0,0,0,0,0),
+    "slight" =  c( 0,0,0,0,0,0,0,1,0,0,0,0,1,0),
+    "High" =  c( 0,0,0,0,0,0,0,1,0,0,0,0,0,1)
+  )
+
+glht_effects_age<-
+  glht(
+    model19.ifn1_elevation_interaction.aerobic_capacity_AGECORRECTED.lmm,
+    linfct = glht_link_age
+  )
+glht_effects_age%>%summary(
+  
+)
+
+glht_effects_age%>%confint()
+
+glht_link <-
+  rbind(
+    "normal" = c( 0,0,0,0,0,0,1,0,0,0,0,0,0),
+    "slight" =  c( 0,0,0,0,0,0,1,0,0,0,0,1,0),
+    "High" =  c( 0,0,0,0,0,0,1,0,0,0,0,0,1)
+  )
+
+glht_effects<-
+  glht(
+    model19.ifn1_elevation_interaction.aerobic_capacity.lmm,
+    linfct = glht_link
+  )
+glht_effects%>%summary(
+  
+)
+
+glht_effects%>%confint()
+glht_effects_age%>%confint()
 ```
+
 ## Model on just baseline and followup because screening is statistically different from baseline
 
 We have moved this method to the main analysis because of suggestions from Søren and Bente.
@@ -1997,7 +2428,7 @@ for (IFNsig in list_of_scores_to_see_differences_over){
                        ".aerobic_capacity.lmm")
   
 interaction.aerobiccapacity.lmm<-lmm(
-  formula = reformulate(paste0("timepoint+treat:timepoint+",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
+  formula = reformulate(paste0("timepoint+treat:timepoint+",IFNsig,"+timepoint:",IFNsig,"+treat:timepoint:",IFNsig,"+sex"),
                         response="aerobiccapacity"),
   repetition = ~timepoint|id,
   structure = "UN",
@@ -2038,6 +2469,31 @@ ggsave(
   plot = plot.model.main.lmm$plot+theme_bw(),
   filename = here("output","graphics",
                   paste0("aerobic_capacity.plot", ifelse(PP, "PP",""),
+                         ".jpg")),
+  width = 12
+)
+
+
+plot.model.main_with_screen.lmm<-
+  plot(model.main_after_QC_with_screen.aerobic_capacity.lmm, 
+     at = data.frame(sex = "F"),
+     type = "fit", 
+     color = "treatment",
+     ci = F,
+     obs.alpha = 0.25)
+
+plot.aerobic_with_screen<-
+  plot.model.main_with_screen.lmm$plot+
+  labs(title = "Aerobic Capacity",
+       x = "Timepoint)",
+       y = "Aerobic Capacity (ml/min/kg)",
+       colour = "Treatment")+
+  theme_bw()
+
+ggsave(
+  plot = plot.aerobic_with_screen,
+  filename = here("output","graphics",
+                  paste0("aerobic_capacity_withscreen.plot", ifelse(PP, "PP",""),
                          ".jpg")),
   width = 12
 )
@@ -2231,10 +2687,10 @@ vo2max.data.wide<-
          m_1_2, m_1_2_geomean, m_3_4, m_3_4_geomean, 
          m_5_12, m_5_12_geomean, ifn_1_el_sherb, ifn_1_el_sherb_geomean,
          ifn_2_el_sherb, ifn_2_el_sherb_geomean, ifn_2_siddiqi,
-         ifn_2_siddiqi_geomean)|>
+         ifn_2_siddiqi_geomean, il_6_related, il_6_related_geomean)|>
   pivot_wider(
   names_from = "timepoint",
-  id_cols = c("id", "treatment", "sex", "ifn_1_netto","all_ifn", "all_ifn_geomean", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean"),
+  id_cols = c("id", "treatment", "sex", "ifn_1_netto","all_ifn", "all_ifn_geomean", "m_1_2", "m_1_2_geomean", "m_3_4", "m_3_4_geomean", "m_5_12", "m_5_12_geomean", "ifn_1_el_sherb", "ifn_1_el_sherb_geomean", "ifn_2_el_sherb", "ifn_2_el_sherb_geomean", "ifn_2_siddiqi", "ifn_2_siddiqi_geomean","il_6_related", "il_6_related_geomean"),
   values_from = c("aerobiccapacity", "vo_2_max")
 )%>%dplyr::filter(!is.na(aerobiccapacity_followup))|>
   dplyr::filter(!is.na(all_ifn))|>
@@ -2301,6 +2757,7 @@ summary(model.delta_aerobiccapacity)
 
 model.BLFU.aerobiccapacity<-lm(delta_aerobiccapacity_BLFU ~ sex+treatment+ifn_1_netto+ifn_1_netto : treatment, data = vo2max.data.wide)
 summary(model.BLFU.aerobiccapacity)
+sum.model.BLFU.aerobiccapacity<-summary(model.BLFU.aerobiccapacity)
 
 model.SCFU.aerobiccapacity<-lm(delta_aerobiccapacity_SCFU ~ ifn_1_netto * treatment, data = vo2max.data.wide)
 summary(model.SCFU.aerobiccapacity)
@@ -2317,7 +2774,24 @@ aerobiccapacity_BLFU_IFN <-
                                colour = treatment)) +
   geom_point() +  
   geom_smooth(method="lm", se=T, level = 0.975) + 
+  #stat_cor(label.x = 2)+
+  #stat_regline_equation()+
   theme_bw()+
+  annotate(geom = "text",
+           label = paste0("unadjusted p = ",
+                          round(sum.model.BLFU.aerobiccapacity$coefficients[5,4], 3),
+                          "*"),
+           x = 3, y =10)+
+  annotate(geom = "text",
+           label = paste0("difference of slopes = ", 
+                          round(sum.model.BLFU.aerobiccapacity$coefficients[5,1], 2), " ml/min/kg/SD (95%CI:",
+                          round(confint(model.BLFU.aerobiccapacity)[5,1],2),
+                                " to ",
+                          round(confint(model.BLFU.aerobiccapacity)[5,2],2),
+                                " )"
+                                
+                          ),
+           x = 3, y =8)+
   labs(title = "Change in Aerobic Capacity by treatment and IFN-1 score",
        x = "IFN-1 score (SD)",
        y = "\u0394 Aerobic Capacity (ml/min/kg)",
@@ -2326,6 +2800,7 @@ aerobiccapacity_BLFU_IFN <-
                          breaks=c("control", "exercise"),
                          labels=c("Control", "Exercise"))
 aerobiccapacity_BLFU_IFN
+
 ggsave(filename=here("Output","Graphics",paste0(
           "aerobiccapacity_change_BL_To_FU_by_IFN", 
   ifelse(PP,"PP",""),
@@ -2354,7 +2829,7 @@ aerobiccapacity_BLFU_IFN_sex <-
                                y = delta_aerobiccapacity_BLFU,
                                color = sex_treat)) +
   geom_point() +  
-  geom_smooth(method="lm", se=T, level = 0.975) + 
+  geom_smooth(method="lm", se=T, level= 0.975) + 
   theme_bw()+
   labs(title = "Change in Aerobic Capacity by treatment and IFN-1 score",
        x = "IFN-1 score (SD)",
@@ -2379,6 +2854,56 @@ vo2_by_IFN
 
 model.delta.vo2<-lm(delta_vo2max ~  ifn_1_netto * treatment, data = vo2max.data.wide)
 summary(model.delta.vo2)
+
+
+aerobiccapacity_BLFU_IFN_no_linear <- 
+  ggplot(vo2max.data.wide, aes(x = ifn_1_netto, 
+                               y = delta_aerobiccapacity_BLFU, 
+                               colour = treatment)) +
+  geom_point() +  
+  geom_smooth(method= "lm",formula = y ~ poly(x, degree = 3),se=T, level = 0.975) + 
+  theme_bw()+
+  labs(title = "Change in Aerobic Capacity by treatment and IFN-1 score",
+       x = "IFN-1 score (SD)",
+       y = "\u0394 Aerobic Capacity (ml/min/kg)",
+       colour = "Treatment")+
+  scale_colour_discrete(name="Treatment",
+                         breaks=c("control", "exercise"),
+                         labels=c("Control", "Exercise"))
+aerobiccapacity_BLFU_IFN_no_linear
+
+
+aerobic_capacity_by_IL6 <- 
+  ggplot(vo2max.data.wide, aes(x = il_6_related, y = delta_aerobiccapacity, colour = treatment)) +
+  geom_point() +  
+  geom_smooth(method="lm", se=T, level = 0.95) + 
+  stat_regline_equation()+
+        theme_bw() +
+  labs(title = "Change in Aerobic Capacity by treatment and IL6 score",
+       subtitle = ifelse(PP, "In the PP Analysis", "in the mITT analysis"),
+       x = "IL-6 score (SD)",
+       y = "\u0394 Aerobic Capacity (ml/min/kg)",
+       colour = "Intervention Group")
+aerobic_capacity_by_IL6
+
+model.delta_aerobiccapacity_IL6<-
+  lm(delta_aerobiccapacity ~ sex+
+                        il_6_related * treatment, 
+                      data = vo2max.data.wide)
+summary(model.delta_aerobiccapacity_IL6)
+
+IL6_by_IFN1 <- 
+  ggplot(vo2max.data.wide, aes(y = il_6_related, x = ifn_1_netto, colour = treatment)) +
+  geom_point() +  
+  geom_smooth(method="lm", se=T, level = 0.95) + 
+        theme_bw() +
+  stat_regline_equation()+
+  labs(title = "Change in IL6  by treatment and IFN-1 score",
+       subtitle = ifelse(PP, "In the PP Analysis", "in the mITT analysis"),
+       x = "IFN-1 score (SD)",
+       y = "IL-6 score (SD)",
+       colour = "Intervention Group")
+IL6_by_IFN1
 
 
 ```
@@ -2723,7 +3248,7 @@ ggplotly(g)
 if(!PP){ #TODO check if this condition can be removed.
   AerobicCapacityModels<-list(
   main.aerobic_capacity.lmm = model.tables(model.main_after_QC_with_screen.aerobic_capacity.lmm, level = 0.975),
-  interaction.aerobic_capacity.lmm = model.tables(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity.lmm, level = 0.975)
+  interaction.aerobic_capacity.lmm = model.tables(model.ifn1_interaction_after_QC_withscreen.aerobic_capacity.lmm, level = 0.95)
 )
 
 saveRDS(
@@ -2732,7 +3257,7 @@ saveRDS(
 
   Vo2Models<-list(
   main.Vo2max.lmm = model.tables(model.main_after_QC.vo2max.lmm, level = 0.975),
-  interaction.Vo2max.lmm = model.tables(model.ifn1_interaction_after_QC.vo2max.lmm, level = 0.975)
+  interaction.Vo2max.lmm = model.tables(model.ifn1_interaction_after_QC.vo2max.lmm, level = 0.95)
 )
   
 Vo2Models|>
@@ -2748,7 +3273,7 @@ if(PP){
   main.aerobic_capacity.lmm = 
     model.tables(model.main_QC_PP.aerobic_capacity.lmm, level = 0.975),
   interaction.aerobic_capacity.lmm = 
-    model.tables(model.interaction_QC_PP.aerobic_capacity.lmm, level = 0.975)
+    model.tables(model.interaction_QC_PP.aerobic_capacity.lmm, level = 0.95)
 )
   
   saveRDS(

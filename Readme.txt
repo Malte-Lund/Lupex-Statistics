@@ -21,6 +21,8 @@ This is the project for statistical analysis of the Type 1 interferon induced ch
 
 Much of the data is kept with Danish and English intertwined, as such, a non-Danish speaking reader would benefit immensely from having a translator ready or running it through a LLM for translating.
 
+Note that this project is my first major coding experience, and I am basically the only person running it, as such, IT IS NOT VERY WELL ORDERED. Enter at your own peril or whatever. Amazingly, the code runs. But it is not clear, concise, well-documented, well-commented or logical. At all. But it works, and it is a thorough analysis of the outcomes of the project.
+
 If you want to run this project, the scripts should be run in the following order:
 	0. 	OPEN THE PROJECT - StatistikLupex.Rproj - Else the Here() function wont work.
 	1. 	DataWrangling.qmd
@@ -30,6 +32,7 @@ If you want to run this project, the scripts should be run in the following orde
 	5. 	CytokineScoreModel.qmd
 	6.  	Analysis_of_ActivityMeasures.qmd (not ActivityMeasures.qmd, that is mainly for generating the data from the accelerometer files)
 	7.  	DifferentialExpression.qmd
+			UPDATE 30/8-2025 for some unknown reason, this is REALLY buggy, it often crashes on load. I have corrected it (multiple times) by pulling out the code and reloading it into a new .r script and then running that, which WORKS FINE!!? I Honestly have no idea why differentialExpression works so horribly. 
 	8.  	OtherExploratoryOutcomes.qmd
 	9.  	ModelAggregation.qmd
 	10.	TablesRUs.qmd
@@ -50,6 +53,7 @@ This project encompassess the following subfolders:
 		DataWrangling_Genes_Deprecated.qmd
 		DietAnalysis.qmd
 		DifferentialExpression.qmd
+			UPDATE 30/8-2025 for some unknown reason, this is REALLY buggy, it often crashes on load. I have corrected it (multiple times) by pulling out the code and reloading it into a new .r script and then running that, which WORKS FINE!!? I Honestly have no idea why differentialExpression works so horribly. 
 		ModelAggregation.qmd
 		OtherExploratoryOutcomes.qmd
 		Questionnaires.qmd
@@ -72,7 +76,7 @@ This project encompassess the following subfolders:
 ~/Data/
 	~/Old_Data/ - Contains older compilations of the raw data with various flaws. 
 
-~/Documents/
+~/Documents/ - Contains knits, reports from third parties (for example nanostring), interpretation documents as well as the pre-published statistical analysis plan.
 
 ~/Output/ - Contains most of the output from running the code, but is also used as intermediate storage between the documents so the code can be run in smaller chunks.
 

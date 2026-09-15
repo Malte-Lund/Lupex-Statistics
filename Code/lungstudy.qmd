@@ -1,0 +1,38 @@
+---
+title: "LUNGSTUDY"
+format: html
+editor: source
+---
+
+
+## Loading packages - Setting options
+
+```{r}
+library(renv)
+#renv::init()
+#install.packages("readxl")
+library("readxl")
+library(dplyr)
+library(tidyr)
+library(here)
+library(snakecase)
+library(ggplot2)
+library(stringr)
+library(writexl)
+#renv::install("table1")
+library(table1)
+#renv::install("flextable")
+#renv::install("officer")
+library(flextable)
+#install.packages("targets")
+#library(targets)
+#use_targets()
+set.seed(42069)
+#renv::install("DescTools")
+library(DescTools)
+
+library(officer)
+
+#set_here(path="C:/Users/mada0011/Desktop/Offline Statistics/Lupex-Statistics")
+here::i_am("Code/lungstudy.qmd")
+```

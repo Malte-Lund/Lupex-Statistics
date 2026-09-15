@@ -2254,6 +2254,8 @@ long_df_hr_change_group<-
 ### Create LMM on long data so we can consider cross-interval covariances.
 
 ```{r}
+mt_summary_pulse.df<-
+  data.frame()
 
 #slope in
 slope_in_nointeract_lmm<-lmm(
@@ -2276,6 +2278,18 @@ plot(slope_in_nointeract_lmm, type = "qqplot")
 plot(slope_in_nointeract_lmm, type = "correlation")
 plot(slope_in_nointeract_lmm,
      color="treatment")
+
+mt_slope_in_nointeract_lmm<-
+  model.tables(slope_in_nointeract_lmm)%>%
+  mutate(
+    outcome = "Slope Into Interval (BPM/s)",
+    type = "Main effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_in_nointeract_lmm
+  )
 
 
 plot.slope_in_nointeract_lmm<-
@@ -2315,6 +2329,7 @@ slope_in_interact_lmm<-lmm(
     ifn_1_netto+
     timepoint:interval+
     timepoint:treat:interval+
+    timepoint:interval:ifn_1_netto+
     timepoint:treat:interval:ifn_1_netto,
   repetition = ~timepoint_interval| id,
   structure = "UN",
@@ -2338,6 +2353,18 @@ plot(slope_in_interact_lmm,
      facet = ~ cut_interval(ifn_1_netto, 3))
 
 anova(slope_in_interact_lmm)
+
+mt_slope_in_interact_lmm<-
+  model.tables(slope_in_interact_lmm)%>%
+  mutate(
+    outcome = "Slope Into Interval (BPM/s)",
+    type = "Interaction effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_in_interact_lmm
+  )
 
 #Slope Out
 
@@ -2389,6 +2416,16 @@ export_plot.slope_out_nointeract_lmm%>%
     filename = here("output","acute bout", "graphics","plot.slope_out_nointeract_lmm.jpg")
   )
 
+mt_slope_out_no_interact_lmm<-
+  model.tables(slope_out_nointeract_lmm)%>%
+  mutate(
+    outcome = "Slope Out of Interval (BPM/s)",
+    type = "Main effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_out_no_interact_lmm)
 
 slope_out_interact_lmm<-lmm(
   formula=
@@ -2399,6 +2436,7 @@ slope_out_interact_lmm<-lmm(
     ifn_1_netto+
     timepoint:interval+
     timepoint:treat:interval+
+    timepoint:interval:ifn_1_netto+
     timepoint:treat:interval:ifn_1_netto,
   repetition = ~timepoint_interval| id,
   structure = "UN",
@@ -2423,6 +2461,17 @@ plot(slope_out_interact_lmm,
 
 anova(slope_out_interact_lmm)
 
+mt_slope_out_interact_lmm<-
+  model.tables(slope_out_interact_lmm)%>%
+  mutate(
+    outcome = "Slope Out of Interval (BPM/s)",
+    type = "Interaction effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_out_interact_lmm
+  )
 
 #Max_HR
 
@@ -2454,6 +2503,18 @@ plot(max_hr_nointeract_lmm,
      color="treatment",
      at = data.frame(sex = "F"),
      ci.alpha = 0.1)
+
+mt_slope_max_hr_no_interact_lmm<-
+  model.tables(max_hr_nointeract_lmm)%>%
+  mutate(
+    outcome = "Maximal Heart Rate (BPM)",
+    type = "Main effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_max_hr_no_interact_lmm
+  )
 
 export_plot.max_hr_obs_nointeract_lmm<-
   plot.max_hr_obs_nointeract_lmm$plot+
@@ -2497,6 +2558,17 @@ plot(max_hr_interact_lmm, type = "correlation")
 plot(max_hr_interact_lmm,
      color="treatment")
 
+mt_slope_max_hr_interact_lmm<-
+  model.tables(max_hr_interact_lmm)%>%
+  mutate(
+    outcome = "Maximal Heart Rate (BPM)",
+    type = "Interaction effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_max_hr_interact_lmm
+  )
   plot(max_hr_interact_lmm, 
      type = "fit", 
      color="treatment",
@@ -2529,6 +2601,19 @@ plot(time_zone5_nointeract_lmm, type = "scatterplot")
 plot(time_zone5_nointeract_lmm, type = "scatterplot2")
 plot(time_zone5_nointeract_lmm, type = "qqplot")
 plot(time_zone5_nointeract_lmm, type = "correlation")
+
+mt_slope_timezone5_nointeract_lmm<-
+  model.tables(time_zone5_nointeract_lmm)%>%
+  mutate(
+    outcome = "Time (s)",
+    type = "Main effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_timezone5_nointeract_lmm
+  )
+
 plot.time_zone5_obs_nointeract_lmm<-
   plot(time_zone5_nointeract_lmm,
      color="treatment",
@@ -2589,6 +2674,18 @@ plot(time_zone5_interact_lmm, type = "correlation")
 plot(time_zone5_interact_lmm,
      color="treatment")
 
+mt_slope_timezone5_interact_lmm<-
+  model.tables(time_zone5_interact_lmm)%>%
+  mutate(
+    outcome = "Time (s)",
+    type = "Interaction effects"
+  )
+mt_summary_pulse.df<-
+  mt_summary_pulse.df%>%
+  bind_rows(
+    mt_slope_timezone5_interact_lmm
+  )
+
   plot(time_zone5_interact_lmm, 
      type = "fit", 
      color="treatment",
@@ -2607,6 +2704,75 @@ export_plot.slope_in_nointeract_lmm
 export_plot.slope_out_nointeract_lmm
 export_plot.max_hr_obs_nointeract_lmm
 export_plot.time_zone5_obs_nointeract_lmm
+
+mt_summary_pulse.df_with_in_hyp<-
+  mt_summary_pulse.df%>%
+  tibble::rownames_to_column(var = "Predictor")%>%
+  mutate(
+    in_hypothesis =
+      case_when(
+          grepl("interval", Predictor) & 
+          grepl("treat",Predictor) & 
+          type=="Main effects" ~ T,
+          grepl("interval", Predictor) & 
+          grepl("treat",Predictor) & 
+          grepl("ifn_1_netto",Predictor) & 
+          type=="Interaction effects" ~ T,
+        T ~ F
+      ),
+    interval = case_when(
+      grepl("interval1", Predictor) ~ "interval 1",
+      grepl("interval2", Predictor) ~ "interval 2",
+      grepl("interval3", Predictor) ~ "interval 3",
+      grepl("interval4", Predictor) ~ "interval 4",
+      T~NA_character_
+    )
+  )
+
+mt_summary_pulse.padjust_df<-
+  mt_summary_pulse.df_with_in_hyp%>%
+    dplyr::filter(
+      in_hypothesis
+    )%>%mutate(
+  p_adj_fdr = p.adjust(p.value, method = "fdr"))
+
+
+mt_summary_pulse_export.df<-
+  mt_summary_pulse.df_with_in_hyp%>%
+  left_join(
+    mt_summary_pulse.padjust_df
+  )%>%
+  mutate(
+    `p-value` = case_when(
+      p.value < 0.001 ~ "p < 0.001",
+      p.value <0.05 ~ paste0("p =",round(p.value,3)),
+      p.value < 0.999 ~ paste0("p =",round(p.value,2)),
+      p.value < 1 ~ "p > 0.999",
+      T~NA_character_
+    ),
+    `p-fdr-adjusted` = case_when(
+      p_adj_fdr < 0.001 ~ "p-adj < 0.001",
+      p_adj_fdr < 0.05 ~ paste0("p-adj =",round(p_adj_fdr,3)),
+      p_adj_fdr < 0.999 ~ paste0("p-adj =",round(p_adj_fdr,2)),
+      p_adj_fdr < 1 ~ "p-adj > 0.999",
+      T~NA_character_
+    ),
+    across(is.numeric, ~ round_pad(.,2))
+  )%>%
+  relocate(
+    outcome, interval, estimate, lower, upper, `p-fdr-adjusted`
+  )%>%
+  arrange(
+    in_hypothesis
+  )
+  
+  
+
+
+mt_summary_pulse_export.df%>%
+  write_xlsx(
+    path = here("output", "acute bout", "tables", "Model_Tables_Summary_heartrate.xlsx")
+  )
 ```
 
 ## Gam models
@@ -2737,6 +2903,21 @@ summary(pulse_gam_interact)
 plot(pulse_gam_interact)
 vis.gam(pulse_gam_interact, view = c("timepoint","ifn_1_netto"))
 gam.check(pulse_gam_interact)
+slopes(pulse_gam_interact, 
+  variables = c("ifn_1_netto"),
+  hypothesis = ~ meandev,
+  newdata = datagrid(ifn_1_netto = 0:6))
+
+
+avg_slopes(pulse_gam_interact, 
+  variables = c("ifn_1_netto"),
+  #hypothesis =  ~ meandev,
+  newdata = datagrid(ifn_1_netto = 0:6))
+
+slopes(pulse_gam_interact, 
+  variables = c("treat","ifn_1_netto"),
+  hypothesis = ~ reference,
+  newdata = datagrid(ifn_1_netto = 0:6, treat = c("exercise","control")))
 
 
 plot_puls_gam_interact<-

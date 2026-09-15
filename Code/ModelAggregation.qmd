@@ -29,8 +29,8 @@ set.seed(42069)
 ## Choose mITT or PP (or ITT by leaving both F)
 
 ```{r}
-mITT = F
-PP = T
+mITT = T
+PP = F
 ```
 
 ## Load Models
@@ -79,7 +79,8 @@ Df.FSS.Interaction<-Primary_outcomes$fatigue_models$FSS_interaction|>
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.Aerobic.Main<-Primary_outcomes$aerobic_capacity_models$main.aerobic_capacity.lmm|>
+Df.Aerobic.Main<-
+  Primary_outcomes$aerobic_capacity_models$main.aerobic_capacity.lmm|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Aerobic Capacity (ml/kg/min)",
          Outcome_Class = "Primary",
@@ -97,13 +98,14 @@ Df.Aerobic.Main<-Primary_outcomes$aerobic_capacity_models$main.aerobic_capacity.
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.Aerobic.Interaction<-Primary_outcomes$aerobic_capacity_models$interaction.aerobic_capacity.lmm|>
+Df.Aerobic.Interaction<-
+  Primary_outcomes$aerobic_capacity_models$interaction.aerobic_capacity.lmm|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Aerobic Capacity (ml/kg/min)",
          Outcome_Class = "Primary",
          Model_Type = "Interaction effects",
          In_hypothesis = case_when(
-           Predictor == "timepointfollowup:treatexercise" ~ T,
+           Predictor == "timepointfollowup:treatexercise" ~ F,
            Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
            T~F),
          p.adjust_Bonferroni = p.value*2,
@@ -316,7 +318,9 @@ df.Secondary_outcomes <-
   bind_rows(Df.SF_36_physical.Main)|>
   bind_rows(Df.SF_36_physical.Interaction)|>
   bind_rows(Df.SF_36_mental.Main)|>
-  bind_rows(Df.SF_36_mental.Interaction)
+  bind_rows(Df.SF_36_mental.Interaction)|>
+  bind_rows(Df.FSS.Interaction)|>
+  bind_rows(Df.Aerobic.Interaction)
 
 df.for.p.adjust_main <- 
   df.Secondary_outcomes |> 
@@ -328,7 +332,10 @@ df.for.p.adjust_interaction <-
   df.Secondary_outcomes |> 
   dplyr::filter(In_hypothesis)|>
   dplyr::filter(Model_Type == "Interaction effects")|>
-  mutate(p_adjust_fdr_interaction = p.adjust(p.value, method = "fdr"))
+  mutate(
+    p_adjust_fdr_interaction = p.adjust(p.value, method = "fdr"),
+    Outcome_Class = "Secondary_interaction"
+  )
 
 df.Secondary_outcomes<-
   df.Secondary_outcomes|>
@@ -369,8 +376,45 @@ print("this is a PP test")
     readRDS(file = here("Output","LMMlists","PP",
                         "SF36_lmm_list.rds")))
 
+Df.FSS.Interaction_PP<-
+  Primary_outcomes_PP$fatigue_models$FSS_interaction|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "FSS",
+         Outcome_Class = "Primary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F),
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+    relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
 
-Df.SLEDAI.Main<-Secondary_outcomes_PP$Sledai_models$SLEDAI_main_PP|>
+Df.Aerobic.Interaction_PP<-
+  Primary_outcomes_PP$aerobic_capacity_models$interaction.aerobic_capacity.lmm|>
+  rownames_to_column(var = "Predictor")|>
+  mutate(Outcome = "Aerobic Capacity (ml/kg/min)",
+         Outcome_Class = "Primary",
+         Model_Type = "Interaction effects",
+         In_hypothesis = case_when(
+           Predictor == "timepointfollowup:treatexercise:ifn_1_netto" ~ T,
+           T~F),
+         p.adjust_Bonferroni = p.value*2,
+         p.adjust_Bonferroni = case_when(
+           p.adjust_Bonferroni >=1 ~ 0.999,
+           T ~ p.adjust_Bonferroni
+         ))|>
+  relocate(
+           Outcome, Outcome_Class, Predictor 
+         )
+
+
+Df.SLEDAI.Main_PP<-
+  Secondary_outcomes_PP$Sledai_models$SLEDAI_main_PP|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SLEDAI",
          Outcome_Class = "Secondary",
@@ -382,7 +426,8 @@ Df.SLEDAI.Main<-Secondary_outcomes_PP$Sledai_models$SLEDAI_main_PP|>
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.SLEDAI.Interaction<-Secondary_outcomes_PP$Sledai_models$SLEDAI_interaction_PP|>
+Df.SLEDAI.Interaction_PP<-
+  Secondary_outcomes_PP$Sledai_models$SLEDAI_interaction_PP|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SLEDAI",
          Outcome_Class = "Secondary",
@@ -393,7 +438,8 @@ Df.SLEDAI.Interaction<-Secondary_outcomes_PP$Sledai_models$SLEDAI_interaction_PP
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.SF_36_physical.Main<-Secondary_outcomes_PP$SF_36_models$main_sf36_physical|>
+Df.SF_36_physical.Main_PP<-
+  Secondary_outcomes_PP$SF_36_models$main_sf36_physical|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SF-36 Physical aggregate score",
          Outcome_Class = "Secondary",
@@ -405,7 +451,8 @@ Df.SF_36_physical.Main<-Secondary_outcomes_PP$SF_36_models$main_sf36_physical|>
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.SF_36_physical.Interaction<-Secondary_outcomes_PP$SF_36_models$interaction_sf36_physical|>
+Df.SF_36_physical.Interaction_PP<-
+  Secondary_outcomes_PP$SF_36_models$interaction_sf36_physical|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SF-36 Physical aggregate score",
          Outcome_Class = "Secondary",
@@ -416,7 +463,8 @@ Df.SF_36_physical.Interaction<-Secondary_outcomes_PP$SF_36_models$interaction_sf
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.SF_36_mental.Main<-Secondary_outcomes_PP$SF_36_models$main_sf36_mental|>
+Df.SF_36_mental.Main_PP<-
+  Secondary_outcomes_PP$SF_36_models$main_sf36_mental|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SF-36 Mental aggregate score",
          Outcome_Class = "Secondary",
@@ -428,7 +476,7 @@ Df.SF_36_mental.Main<-Secondary_outcomes_PP$SF_36_models$main_sf36_mental|>
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.SF_36_mental.Interaction<-Secondary_outcomes_PP$SF_36_models$interaction_sf36_mental|>
+Df.SF_36_mental.Interaction_PP<-Secondary_outcomes_PP$SF_36_models$interaction_sf36_mental|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "SF-36 Mental aggregate score",
          Outcome_Class = "Secondary",
@@ -440,12 +488,14 @@ Df.SF_36_mental.Interaction<-Secondary_outcomes_PP$SF_36_models$interaction_sf36
          )
 
 df.Secondary_outcomes_PP <- 
-  Df.SLEDAI.Main |> 
-  bind_rows(Df.SLEDAI.Interaction)|>
-  bind_rows(Df.SF_36_physical.Main)|>
-  bind_rows(Df.SF_36_physical.Interaction)|>
-  bind_rows(Df.SF_36_mental.Main)|>
-  bind_rows(Df.SF_36_mental.Interaction)
+  Df.SLEDAI.Main_PP |> 
+  bind_rows(Df.SLEDAI.Interaction_PP)|>
+  bind_rows(Df.SF_36_physical.Main_PP)|>
+  bind_rows(Df.SF_36_physical.Interaction_PP)|>
+  bind_rows(Df.SF_36_mental.Main_PP)|>
+  bind_rows(Df.SF_36_mental.Interaction_PP)|>
+  bind_rows(Df.FSS.Interaction_PP)|>
+  bind_rows(Df.Aerobic.Interaction_PP)
 
 df.for.p.adjust_main_PP <- 
   df.Secondary_outcomes_PP |> 
@@ -778,7 +828,7 @@ Df.PFT_FEV1.Interaction<-Exploratory_outcomes$lung_function_models$model.interac
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.PROM_fatigue.Main<-Exploratory_outcomes$PROM_models$VAS_fatigue_main|>
+Df.PROM_fatigue.Main<-Exploratory_outcomes$PROM_models$vas_fatigue_main|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Fatigue Visual Analog Scale",
          Outcome_Class = "Exploratory",
@@ -791,7 +841,7 @@ Df.PROM_fatigue.Main<-Exploratory_outcomes$PROM_models$VAS_fatigue_main|>
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.PROM_fatigue.Interaction<-Exploratory_outcomes$PROM_models$VAS_fatigue_interaction|>
+Df.PROM_fatigue.Interaction<-Exploratory_outcomes$PROM_models$vas_fatigue_interaction|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Fatigue Visual Analog Scale",
          Outcome_Class = "Exploratory",
@@ -1448,7 +1498,7 @@ Df.PFT_FEV1.Interaction<-Exploratory_outcomes_PP$lung_function_models$model.inte
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.PROM_fatigue.Main<-Exploratory_outcomes_PP$PROM_models$VAS_fatigue_main|>
+Df.PROM_fatigue.Main<-Exploratory_outcomes_PP$PROM_models$vas_fatigue_main|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Fatigue Visual Analog Scale",
          Outcome_Class = "Exploratory",
@@ -1461,7 +1511,7 @@ Df.PROM_fatigue.Main<-Exploratory_outcomes_PP$PROM_models$VAS_fatigue_main|>
            Outcome, Outcome_Class, Predictor 
          )
 
-Df.PROM_fatigue.Interaction<-Exploratory_outcomes_PP$PROM_models$VAS_fatigue_interaction|>
+Df.PROM_fatigue.Interaction<-Exploratory_outcomes_PP$PROM_models$vas_fatigue_interaction|>
   rownames_to_column(var = "Predictor")|>
   mutate(Outcome = "Fatigue Visual Analog Scale",
          Outcome_Class = "Exploratory",

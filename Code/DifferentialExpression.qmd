@@ -1,5 +1,6 @@
 ---
-title: "Differential Expression analysis"
+title: "Differential Expression"
+
 format: html
 editor: visual
 ---
@@ -351,7 +352,7 @@ log2_volcano_plot_adj #This plot is a bit boring, but more true, most of what ha
 
 Sadly we cannot fit a mixed effect model, but it is probably okay with our baseline constrain.
 
-```{r eval = T}
+```{r eval = F}
 time5<-Sys.time()
 
 data_negbin <- data|>

@@ -8,7 +8,7 @@ editor: visual
 ## Loading packages - Setting options
 
 ```{r}
-#library(renv)
+library(renv)
 #renv::init()
 #install.packages("readxl")
 library("readxl")
@@ -114,6 +114,8 @@ group$id<-to_snake_case(group$id)
       successful_exercise / attendance * 100
     )
   hist(exercise_merged$succes_percentage)
+  hist(exercise_merged$attendance, breaks = 15)
+  hist(exercise_merged$successful_exercise, breaks = 15)
   
   count(exercise_merged,succesful_HIIT)
   count(exercise_merged,attendance_sufficient)
@@ -1205,7 +1207,10 @@ questionnaires_after_followup <-  read_excel(
     !is.na(timepoint))|>rename_with(to_snake_case)|>
   mutate(across(
     .cols=c(fss_motivation:slaq_udslaet_andet, 
-            slaq_moerke_blaa_pletter:sf_36_11_d), .fn = as.numeric)) #For some reason, some questions have multiple answers, I use the first answer given to each question in this case.
+            slaq_moerke_blaa_pletter:sf_36_11_d), .fn = as.numeric),
+    visuel_analog_træthedsskala_vats_målt_i_mm = 
+      case_when(visuel_analog_træthedsskala_vats<10 ~ visuel_analog_træthedsskala_vats*10,
+                T~visuel_analog_træthedsskala_vats)) #For some reason, some questions have multiple answers, I use the first answer given to each question in this case.
   
 #str(questionnaires_after_followup)
 #View(questionnaires_after_followup)
@@ -1216,7 +1221,10 @@ questionnaires2<-
   group_by(id)|>
   tidyr::fill(
     attendance:ifn_gamma_siddiqi_geomean
-  )|>ungroup()
+  )|>ungroup()%>%
+  mutate(
+    vas_fatigue = 100-visuel_analog_træthedsskala_vats_målt_i_mm
+  )
 
 
 #View(questionnaires2)
@@ -1425,14 +1433,18 @@ SF_36_component_scores <- SF.36.Zscores %>%
 
 SF_36_recoded2<-SF_36_recoded %>% left_join(SF_36_component_scores, join_by(id, timepoint))
 
-SF_36_aggregates <- SF_36_recoded2 %>% dplyr::select(id, timepoint, 
-                                             physical.component.score, mental.component.score,
-                                             physical_function, role_limitations_physical_health,
-                                             role_limitations_emotional_health, energy_fatigue,
-                                             emotional_well_being,
-                                             social_functioning,
-                                             pain,
-                                             general_health)
+SF_36_aggregates <- SF_36_recoded2 %>% 
+  dplyr::select(id, timepoint,
+                physical.component.score, 
+                mental.component.score,
+                physical_function, 
+                role_limitations_physical_health,
+                role_limitations_emotional_health, 
+                energy_fatigue,
+                emotional_well_being,
+                social_functioning,
+                pain,
+                general_health)
 
 questionnaires.data.SF_36<-
   left_join(questionnaires.data,SF_36_aggregates,by=join_by("id","timepoint"))%>%
@@ -2248,11 +2260,11 @@ table1.questionnaires <-
   dplyr::select(
   id, sex, timepoint, 
   #m_1_2, ifn_1_el_sherb, m_3_4, ifn_2_el_sherb, m_5_12, 
-  fatigue.mean, visuel_analog_træthedsskala_vats_målt_i_mm,
+  fatigue.mean, vas_fatigue,
   physical.component.score, mental.component.score, 
   sla_qvas, qslaq_score, qslaq_symptom_score)%>%
   dplyr::mutate(
-    vas_fatigue = `visuel_analog_træthedsskala_vats_målt_i_mm`,
+    #vas_fatigue = 100-`visuel_analog_træthedsskala_vats_målt_i_mm`, included up higher
     sf36_physical.component.score = physical.component.score,
     sf36_mental.component.score = mental.component.score,
     FSS = fatigue.mean,
@@ -2380,7 +2392,43 @@ table1.IFN.Quant.At.Baseline <-
          il6_elevated = "Normal", #il-6 related Z-scores are also not above 2.
          .keep = "none"
          )
+##Table 1 baseline exercise
+table1.baseline.exercise <- 
+  data %>% 
+  dplyr::select(
+    allocation_no,
+    sex, 
+    hvor_ofte_træner_du_i_gennemsnit_per_uge,
+    hvor_hårdt_presser_du_dig_selv_ved_disse_træninger,
+    hvor_lang_tid_træner_du_per_træning,
+    taljemål_måles
+  )%>%
+  dplyr::filter(
+    !is.na(hvor_ofte_træner_du_i_gennemsnit_per_uge)
+  )%>%
+  mutate(
+  id = to_snake_case(as.character(allocation_no)),
+  weekly_exercise_sessions = factor(hvor_ofte_træner_du_i_gennemsnit_per_uge,
+                                    labels = c("Never Exercise",
+                                               "Less than one",
+                                               "Once per week",
+                                               "2-3 times per week",
+                                               "Almost every day")),
+  exercise_intensity = factor(hvor_hårdt_presser_du_dig_selv_ved_disse_træninger, 
+                              labels = c("Never Exercise",
+                                         "No sweat or severe loss of breath",
+                                         "Sweat and severe loss of breath",
+                                         "Until exhaustion")),
+  exercise_duration = factor(hvor_lang_tid_træner_du_per_træning,
+                             labels = c("Never Exercise",
+                                         "Less than 15 minutes",
+                                         "15-30 minutes",
+                                         "31-60 minutes",
+                                         "more than 60 minutes")),
+  timepoint = "baseline")
+
 ```
+
 
 ### Table 1 Vo2Max
 
@@ -2492,46 +2540,63 @@ table1.other.anthropometric.medicalhistory <-
   mutate(timepoint=case_when(
     task_name == "Visit 5 - Follow-Up" ~ "followup",
     task_name == "Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion" ~ "screening",
-     grepl("Baseline",task_name) ~ "baseline"))%>%
-  dplyr::select(id, treatment,sex,timepoint, mITT, 
-                højde, weight, taljeomkreds, 
-                hvilepuls,
-                etnisk_oprindelse, etnicitet_anden, 
-                systolisk_bt, diastolisk_bt,
-                sle_start_dato,
-                medicin_ændringer_siden_baseline,
-                tidligere_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
-                aktuel_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
-                relevant_hvilket,
-                hvilket_medicin_anden_relevant,
-                hvilket_medicin_anden_relevant_001,
-                hvilket_medicin_002,
-                rituximab, dosis_rtx, seneste_rtx, 
-                cyklofosfamid, dosis_cyclo,senest_cyclo, 
-                andet_medicin, hvilket_andet, dosis_andet,
-                andet_med_2, hvilket_andet_med_2, andet_med_dosis,
-                andet_med_3, hvilket_andet_med_3, dosis_andet_med_3,
-                andet_med_4, hvilket_andet_med_4, dosis_andet_med_4
-                )%>%mutate(
-                  height = højde,
-  waist_circumference = taljeomkreds,
-  resting_pulse=hvilepuls,
-  ethnicity = case_when(
-    etnisk_oprindelse == 0 ~ "Caucasian",
-    etnisk_oprindelse == 1 ~ "Asian",
-    etnisk_oprindelse == 2 ~ case_when(
-      etnicitet_anden == "mellemøsten" ~ "Middle-Eastern",
-      etnicitet_anden == "Afrikaner" ~ "African",
-      etnicitet_anden == "Argentina" ~ "Latin America",
-      etnicitet_anden == "Iran" ~ "Middle-Eastern",
-      T ~ NA_character_
+    grepl("Baseline",task_name) ~ "baseline"))%>%
+  dplyr::select(
+    id, treatment,sex,timepoint, mITT, 
+    højde, weight, taljeomkreds, 
+    hvilepuls,
+    etnisk_oprindelse, etnicitet_anden, 
+    systolisk_bt, diastolisk_bt,
+    sle_start_dato,
+    tobak,
+    tobak_pakkeår,
+    tidligere_tobak,
+    tidlig_pakkeår,
+    medicin_ændringer_siden_baseline,
+    tidligere_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
+    aktuel_medicin_sle, #TODO Update so it's clear which medication this is with dummy codes
+    relevant_hvilket,
+    hvilket_medicin_anden_relevant,
+    hvilket_medicin_anden_relevant_001,
+    hvilket_medicin_002,
+    rituximab, dosis_rtx, seneste_rtx, 
+    cyklofosfamid, dosis_cyclo,senest_cyclo, 
+    andet_medicin, hvilket_andet, dosis_andet,
+    andet_med_2, hvilket_andet_med_2, andet_med_dosis,
+    andet_med_3, hvilket_andet_med_3, dosis_andet_med_3,
+    andet_med_4, hvilket_andet_med_4, dosis_andet_med_4
+  )%>%mutate(
+    height = højde,
+    smoking_status = case_when(
+      tobak == 1 ~ "Current Smoker",
+      tobak == 0 ~ case_when(
+        tidligere_tobak == 1 ~ "Former Smoker", 
+        tidligere_tobak == 0 ~ "Never Smoker",
+        T~NA),
+      T~ NA),
+    pack_years = case_when(
+      is.na(tidlig_pakkeår) ~ tobak_pakkeår,
+      is.na(tobak_pakkeår) ~ tidlig_pakkeår,
+      T~tidlig_pakkeår+tobak_pakkeår
     ),
+    waist_circumference = taljeomkreds,
+    resting_pulse=hvilepuls,
+    ethnicity = case_when(
+      etnisk_oprindelse == 0 ~ "Caucasian",
+      etnisk_oprindelse == 1 ~ "Asian",
+      etnisk_oprindelse == 2 ~ case_when(
+        etnicitet_anden == "mellemøsten" ~ "Middle-Eastern",
+        etnicitet_anden == "Afrikaner" ~ "African",
+        etnicitet_anden == "Argentina" ~ "Latin America",
+        etnicitet_anden == "Iran" ~ "Middle-Eastern",
+        T ~ NA_character_
+      ),
       id              == "lup_014" ~ "Caucasian",
-    T~NA_character_
-  ),
-  .keep="all")%>%dplyr::select(-c(
-    højde, taljeomkreds
-  ))
+      T~NA_character_
+    ),
+    .keep="all")%>%dplyr::select(-c(
+      højde, taljeomkreds
+    ))
 
 table1.other.anthropometric.medicalhistory2<-
   table1.other.anthropometric.medicalhistory%>%
@@ -2778,16 +2843,18 @@ write_xlsx(table1.other.anthropometric.medicalhistory2, path = here("Data","tabl
 
 #View(table1.other.anthropometric.medicalhistory2)
 
-screening.waist.weight <- `_c_visit__samtykke_inklusion_eksklusionskriterier_baseline_fysisk_aktivitet.data`%>%dplyr::select(
-  id,
-  taljemål_måles,
-  hvilepuls,
-  vægt)%>%mutate(
-  timepoint = "screening",
-  waist_circumference = taljemål_måles,
-  resting_pulse=hvilepuls,
-  weight = vægt,
-  .keep="unused")
+screening.waist.weight <- 
+  `_c_visit__samtykke_inklusion_eksklusionskriterier_baseline_fysisk_aktivitet.data`%>%
+  dplyr::select(
+    id,
+    taljemål_måles,
+    hvilepuls,
+    vægt)%>%mutate(
+      timepoint = "screening",
+      waist_circumference = taljemål_måles,
+      resting_pulse=hvilepuls,
+      weight = vægt,
+      .keep="unused")
 
 table1.other.anthropometric.medicalhistory <- 
   table1.other.anthropometric.medicalhistory2 %>% 
@@ -2855,7 +2922,7 @@ table1.blood.samples <- Bloodsample.wide.no.OGTTorAcute.snake.cols %>% dplyr::se
 
 if(fullaccess){suppressWarnings(
 table1.age <- read_excel(
-  path="L:/LovbeskyttetMapper/LupEx/TMF/10 Kildedata/Samlet Data v.5.xlsx")%>%
+  path="L:/AuditData/LupEx/TMF/10 Kildedata/Samlet Data v.5.xlsx")%>%
   filter(
     task_name=="Visit 1 - Samtykke, Telefonopkald, Inklusion + Ekslusion") %>%
   dplyr::select(
@@ -2912,6 +2979,9 @@ data.table1 <-
            )%>%
   left_join( 
   table1.other.anthropometric.medicalhistory, by=c("id","timepoint"), keep =F
+           )%>%
+  left_join(
+  table1.baseline.exercise, by = c("id","timepoint", "sex")
            )%>%
   left_join(PP_list)%>%
   mutate(timepoint = factor(timepoint,levels = c("screening", "baseline", "followup")))%>%
